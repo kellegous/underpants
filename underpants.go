@@ -18,15 +18,19 @@ import (
   "strings"
 )
 
-// TODO(knorton): get rid of key altogether.
 // TODO(knorton): add port flag instead of addr and add ports to
 //                all incoming hosts.
 // TODO(knorton): allow websockets to pass.
+// TODO(knorton): add minimal ui to hub just to see who you are and
+//                perhaps who is passing.
+// TODO(knorton): cache cookie values in LRU cache.
 const (
   userCookieKey  = "u"
   authPathPrefix = "/__auth__/"
 )
 
+// TODO(knorton): Remove the nominal types that are embedded here
+//                and just use anonymous structs.
 type conf struct {
   Host   string
   Oauth  *oauthConf
