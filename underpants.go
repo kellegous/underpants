@@ -16,43 +16,56 @@ import (
   "net/url"
   "os"
   "strings"
+  "sync"
 )
 
-// TODO(knorton): add port flag instead of addr and add ports to
-//                all incoming hosts.
 // TODO(knorton): allow websockets to pass.
 // TODO(knorton): add minimal ui to hub just to see who you are and
 //                perhaps who is passing.
-// TODO(knorton): cache cookie values in LRU cache.
 const (
   userCookieKey  = "u"
   authPathPrefix = "/__auth__/"
 )
 
-// TODO(knorton): Remove the nominal types that are embedded here
-//                and just use anonymous structs.
 type conf struct {
-  Host   string
-  Oauth  *oauthConf
-  Routes []*routeConf
-}
-
-type oauthConf struct {
-  ClientId     string `json:"client-id"`
-  ClientSecret string `json:"client-secret"`
-  Scope        string `json:"scope"`
-  Domain       string `json:"domain"`
-}
-
-type routeConf struct {
-  From string
-  To   string
+  Host  string
+  Oauth struct {
+    ClientId     string `json:"client-id"`
+    ClientSecret string `json:"client-secret"`
+    Scope        string `json:"scope"`
+    Domain       string `json:"domain"`
+  }
+  Routes []struct {
+    From string
+    To   string
+  }
 }
 
 type user struct {
   Email   string
   Name    string
   Picture string
+}
+
+// a really simple user cache to avoid having to fully decode
+// hmac signatures.
+// TODO(knorton): this cache grows unbounded
+type Cache struct {
+  l sync.RWMutex
+  v map[string]*user
+}
+
+func (c *Cache) read(key string) (*user, bool) {
+  c.l.RLock()
+  defer c.l.RUnlock()
+  u, ok := c.v[key]
+  return u, ok
+}
+
+func (c *Cache) write(key string, u *user) {
+  c.l.Lock()
+  defer c.l.Unlock()
+  c.v[key] = u
 }
 
 func (u *user) encode(key []byte) (string, error) {
@@ -114,6 +127,7 @@ type disp struct {
   key    []byte
   domain string
   oauth  *oauth.Config
+  cache  *Cache
 }
 
 func (d *disp) AuthCodeUrl(u *url.URL) string {
@@ -130,10 +144,15 @@ func copyHeaders(dst, src http.Header) {
   }
 }
 
-func userFrom(r *http.Request, key []byte) *user {
+func userFrom(r *http.Request, cache *Cache, key []byte) *user {
   c, err := r.Cookie(userCookieKey)
   if err != nil || c.Value == "" {
     return nil
+  }
+
+  // check the cache
+  if u, found := cache.read(c.Value); found {
+    return u
   }
 
   v, err := url.QueryUnescape(c.Value)
@@ -147,6 +166,9 @@ func userFrom(r *http.Request, key []byte) *user {
     return nil
   }
 
+  // this was a cache miss
+  cache.write(c.Value, u)
+
   return u
 }
 
@@ -159,7 +181,7 @@ func urlFor(host string, r *http.Request) *url.URL {
 }
 
 func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
-  u := userFrom(r, d.key)
+  u := userFrom(r, d.cache, d.key)
   if u == nil {
     http.Redirect(w, r,
       d.AuthCodeUrl(urlFor(d.from, r)),
@@ -198,14 +220,15 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  _, err := decodeUser(c, d.key)
-  if err != nil {
-    // do not redirect out of here because this indicates a big
-    // problem and we're likely to get into a redir loop.
-    http.Error(w,
-      http.StatusText(http.StatusForbidden),
-      http.StatusForbidden)
-    return
+  if _, found := d.cache.read(c); !found {
+    if _, err := decodeUser(c, d.key); err != nil {
+      // do not redirect out of here because this indicates a big
+      // problem and we're likely to get into a redir loop.
+      http.Error(w,
+        http.StatusText(http.StatusForbidden),
+        http.StatusForbidden)
+      return
+    }
   }
 
   http.SetCookie(w, &http.Cookie{
@@ -229,14 +252,14 @@ func (d *disp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func oauthConfig(c *conf) *oauth.Config {
+func oauthConfig(c *conf, port int) *oauth.Config {
   return &oauth.Config{
     ClientId:     c.Oauth.ClientId,
     ClientSecret: c.Oauth.ClientSecret,
     AuthURL:      "https://accounts.google.com/o/oauth2/auth",
     TokenURL:     "https://accounts.google.com/o/oauth2/token",
     Scope:        c.Oauth.Scope,
-    RedirectURL:  fmt.Sprintf("http://%s%s", c.Host, authPathPrefix),
+    RedirectURL:  fmt.Sprintf("http://%s%s", hostOf(c.Host, port), authPathPrefix),
   }
 }
 
@@ -264,7 +287,16 @@ func newKey() ([]byte, error) {
   return b.Bytes(), nil
 }
 
-func setup(c *conf) (*http.ServeMux, error) {
+func hostOf(name string, port int) string {
+  switch port {
+  case 80:
+  case 443:
+    return name
+  }
+  return fmt.Sprintf("%s:%d", name, port)
+}
+
+func setup(c *conf, port int) (*http.ServeMux, error) {
   m := http.NewServeMux()
 
   key, err := newKey()
@@ -272,16 +304,20 @@ func setup(c *conf) (*http.ServeMux, error) {
     return nil, err
   }
 
+  cache := Cache{v: map[string]*user{}}
+
   // setup routes
-  oc := oauthConfig(c)
+  oc := oauthConfig(c, port)
   for _, route := range c.Routes {
-    m.Handle(fmt.Sprintf("%s/", route.From), &disp{
-      from:   route.From,
+    host := hostOf(route.From, port)
+    m.Handle(fmt.Sprintf("%s/", host), &disp{
+      from:   host,
       to:     route.To,
       host:   c.Host,
       domain: c.Oauth.Domain,
       key:    key,
       oauth:  oc,
+      cache:  &cache,
     })
   }
 
@@ -289,7 +325,7 @@ func setup(c *conf) (*http.ServeMux, error) {
   m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "text/plain")
     for _, route := range c.Routes {
-      fmt.Fprintf(w, "%s -> %s\n", route.From, route.To)
+      fmt.Fprintf(w, "%s -> %s\n", hostOf(route.From, port), route.To)
     }
   })
 
@@ -344,6 +380,9 @@ func setup(c *conf) (*http.ServeMux, error) {
       panic(err)
     }
 
+    // keep this in cache for quick verification
+    cache.write(v, &u)
+
     http.SetCookie(w, &http.Cookie{
       Name:   userCookieKey,
       Value:  url.QueryEscape(v),
@@ -383,8 +422,18 @@ func setup(c *conf) (*http.ServeMux, error) {
   return m, nil
 }
 
+func addrFrom(port int) string {
+  switch port {
+  case 80:
+    return ":http"
+  case 443:
+    return ":https"
+  }
+  return fmt.Sprintf(":%d", port)
+}
+
 func main() {
-  flagAddr := flag.String("addr", ":4480", "")
+  flagPort := flag.Int("port", 80, "")
   flagConf := flag.String("conf", "underpants.json", "")
 
   flag.Parse()
@@ -394,12 +443,12 @@ func main() {
     panic(err)
   }
 
-  m, err := setup(c)
+  m, err := setup(c, *flagPort)
   if err != nil {
     panic(err)
   }
 
-  if err := http.ListenAndServe(*flagAddr, m); err != nil {
+  if err := http.ListenAndServe(addrFrom(*flagPort), m); err != nil {
     panic(err)
   }
 }
