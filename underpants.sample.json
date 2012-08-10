@@ -1,0 +1,15 @@
+{
+  "host" : "entry.company.com",
+  "oauth" : {
+    "domain"        : "company.com",
+    "client-id"     : "oauth-client-id",
+    "client-secret" : "oauth-client-secret",
+    "scope"         : "https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email"
+  },
+  "routes" : [
+    {
+      "from" : "public.company.com",
+      "to"   : "localhost:8080"
+    }
+  ]
+}
