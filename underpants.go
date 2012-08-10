@@ -289,8 +289,7 @@ func newKey() ([]byte, error) {
 
 func hostOf(name string, port int) string {
   switch port {
-  case 80:
-  case 443:
+  case 80, 443:
     return name
   }
   return fmt.Sprintf("%s:%d", name, port)
