@@ -12,7 +12,6 @@ import (
   "flag"
   "fmt"
   "io"
-  "log"
   "net/http"
   "net/url"
   "os"
@@ -57,7 +56,6 @@ type Cache struct {
 }
 
 func (c *Cache) read(key string) (*user, bool) {
-  log.Printf("read(%s)\n", key)
   c.l.RLock()
   defer c.l.RUnlock()
   u, ok := c.v[key]
@@ -65,7 +63,6 @@ func (c *Cache) read(key string) (*user, bool) {
 }
 
 func (c *Cache) write(key string, u *user) {
-  log.Printf("write(%s, %s)\n", key, u.Email)
   c.l.Lock()
   defer c.l.Unlock()
   c.v[key] = u
@@ -153,14 +150,14 @@ func userFrom(r *http.Request, cache *Cache, key []byte) *user {
     return nil
   }
 
-  // check the cache
-  if u, found := cache.read(c.Value); found {
-    return u
-  }
-
   v, err := url.QueryUnescape(c.Value)
   if err != nil {
     return nil
+  }
+
+  // check the cache
+  if u, found := cache.read(v); found {
+    return u
   }
 
   u, err := decodeUser(v, key)
