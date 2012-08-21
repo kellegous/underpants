@@ -11,12 +11,12 @@ import (
   "errors"
   "flag"
   "fmt"
+  "github.com/kellegous/lilcache"
   "io"
   "net/http"
   "net/url"
   "os"
   "strings"
-  "sync"
 )
 
 // TODO(knorton): allow websockets to pass.
@@ -45,27 +45,6 @@ type user struct {
   Email   string
   Name    string
   Picture string
-}
-
-// a really simple user cache to avoid having to fully decode
-// hmac signatures.
-// TODO(knorton): this cache grows unbounded
-type Cache struct {
-  l sync.RWMutex
-  v map[string]*user
-}
-
-func (c *Cache) read(key string) (*user, bool) {
-  c.l.RLock()
-  defer c.l.RUnlock()
-  u, ok := c.v[key]
-  return u, ok
-}
-
-func (c *Cache) write(key string, u *user) {
-  c.l.Lock()
-  defer c.l.Unlock()
-  c.v[key] = u
 }
 
 func (u *user) encode(key []byte) (string, error) {
@@ -127,7 +106,7 @@ type disp struct {
   key    []byte
   domain string
   oauth  *oauth.Config
-  cache  *Cache
+  cache  *lilcache.Cache
 }
 
 func (d *disp) AuthCodeUrl(u *url.URL) string {
@@ -144,7 +123,7 @@ func copyHeaders(dst, src http.Header) {
   }
 }
 
-func userFrom(r *http.Request, cache *Cache, key []byte) *user {
+func userFrom(r *http.Request, cache *lilcache.Cache, key []byte) *user {
   c, err := r.Cookie(userCookieKey)
   if err != nil || c.Value == "" {
     return nil
@@ -156,8 +135,8 @@ func userFrom(r *http.Request, cache *Cache, key []byte) *user {
   }
 
   // check the cache
-  if u, found := cache.read(v); found {
-    return u
+  if u, t := cache.Get(v); !t.IsZero() {
+    return u.(*user)
   }
 
   u, err := decodeUser(v, key)
@@ -167,7 +146,7 @@ func userFrom(r *http.Request, cache *Cache, key []byte) *user {
   }
 
   // this was a cache miss
-  cache.write(c.Value, u)
+  cache.Put(c.Value, u)
 
   return u
 }
@@ -220,7 +199,8 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  if _, found := d.cache.read(c); !found {
+  // verify the cookie
+  if _, t := d.cache.Get(c); t.IsZero() {
     if _, err := decodeUser(c, d.key); err != nil {
       // do not redirect out of here because this indicates a big
       // problem and we're likely to get into a redir loop.
@@ -303,7 +283,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     return nil, err
   }
 
-  cache := Cache{v: map[string]*user{}}
+  cache := lilcache.New(50)
 
   // setup routes
   oc := oauthConfig(c, port)
@@ -316,7 +296,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
       domain: c.Oauth.Domain,
       key:    key,
       oauth:  oc,
-      cache:  &cache,
+      cache:  cache,
     })
   }
 
@@ -380,7 +360,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     }
 
     // keep this in cache for quick verification
-    cache.write(v, &u)
+    cache.Put(v, &u)
 
     http.SetCookie(w, &http.Cookie{
       Name:   userCookieKey,
