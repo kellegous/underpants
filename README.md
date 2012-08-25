@@ -30,7 +30,7 @@ Your underpants are configured through a silly little JSON file. Here's an examp
 ## Running
 
 Just run it; it's an executable.
-    underpants
+```underpants```
 
 ## Some TODO's
  * Add some TODO's
