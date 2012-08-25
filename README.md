@@ -6,7 +6,7 @@ Suppose you are a Google Apps customer and suppose you want to restrict access t
 ## Installation
 
 ```
-go install github.com/kellegous/underpants
+go get github.com/kellegous/underpants
 ```
 
 ## Configuration
@@ -39,4 +39,5 @@ underpants
 ```
 
 ## Some TODO's
- * Add some TODO's
+ * SSL, yes, it needs to be able to do SSL.
+ * Handle non-transactional traffic, like web sockets.
