@@ -4,7 +4,10 @@
 Suppose you are a Google Apps customer and suppose you want to restrict access to some web servers to just the folks in your organization. Like, for instance, if you're building your internal apps on AWS. Pain in the ass, right? So put underpants in between the world and your backends and you can use your Google credentials to restrict access.
 
 ## Installation
-```go install github.com/kellegous/underpants```
+
+```
+go install github.com/kellegous/underpants
+```
 
 ## Configuration
 
