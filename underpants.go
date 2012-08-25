@@ -33,7 +33,6 @@ type conf struct {
   Oauth struct {
     ClientId     string `json:"client-id"`
     ClientSecret string `json:"client-secret"`
-    Scope        string `json:"scope"`
     Domain       string `json:"domain"`
   }
   Routes []struct {
@@ -239,7 +238,7 @@ func oauthConfig(c *conf, port int) *oauth.Config {
     ClientSecret: c.Oauth.ClientSecret,
     AuthURL:      "https://accounts.google.com/o/oauth2/auth",
     TokenURL:     "https://accounts.google.com/o/oauth2/token",
-    Scope:        c.Oauth.Scope,
+    Scope:        "https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
     RedirectURL:  fmt.Sprintf("http://%s%s", hostOf(c.Host, port), authPathPrefix),
   }
 }

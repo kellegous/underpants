@@ -18,8 +18,7 @@ Your underpants are configured through a silly little JSON file. Here's an examp
   "oauth" : {
     "domain"        : "company.com",
     "client-id"     : "oauth-client-id",
-    "client-secret" : "oauth-client-secret",
-    "scope"         : "https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email"
+    "client-secret" : "oauth-client-secret"
   },
   "routes" : [
     {
@@ -29,6 +28,8 @@ Your underpants are configured through a silly little JSON file. Here's an examp
   ]
 }
 </pre>
+
+You can get your oauth-client-id and oauth-client-secret by creating a project on [Google's API Console](https://code.google.com/apis/console).
 
 ## Running
 
