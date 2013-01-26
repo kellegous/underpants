@@ -176,7 +176,7 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
   copyHeaders(br.Header, r.Header)
 
   br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
-  br.Header.Add("Underpants-Name", url.QueryEscape(u.Email))
+  br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
 
   // TODO(knorton): Add special headers.
   c := http.Client{}
