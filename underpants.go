@@ -173,12 +173,15 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
     panic(err)
   }
 
+  // Without passing on the original Content-Length, http.Client will use
+  // Transfer-Encoding: chunked which some HTTP servers fall down on.
+  br.ContentLength = r.ContentLength
+
   copyHeaders(br.Header, r.Header)
 
   br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
   br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
 
-  // TODO(knorton): Add special headers.
   c := http.Client{}
   bp, err := c.Do(br)
   if err != nil {
