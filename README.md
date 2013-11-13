@@ -14,12 +14,18 @@ go get github.com/kellegous/underpants
 Your underpants are configured through a silly little JSON file. Here's an example:
 <pre>
 {
-  "host" : "entry.company.com",
+  "host" : "underpants.company.com",
   "oauth" : {
     "domain"        : "company.com",
     "client-id"     : "oauth-client-id",
     "client-secret" : "oauth-client-secret"
   },
+  "certs" : [
+    {
+      "crt" : "/path/to/crt.pem",
+      "key" : "/path/to/key.pem"
+    }
+  ],
   "routes" : [
     {
       "from" : "public.company.com",
@@ -28,6 +34,10 @@ Your underpants are configured through a silly little JSON file. Here's an examp
   ]
 }
 </pre>
+
+The `certs` section is optional and its absense will cause your underpants proxy to operate on pure HTTP. The key file may be encrypted so
+long as it is in encrypted PEM format with proper `Proc-Type` and `Dek-Info` headers. If you do not know what that means, just use openssl
+and that is what you will end up with.
 
 You can get your oauth-client-id and oauth-client-secret by creating a project on [Google's API Console](https://code.google.com/apis/console).
 
@@ -40,5 +50,4 @@ underpants
 ```
 
 ## Some TODO's
- * SSL, yes, it needs to be able to do SSL.
  * Handle non-transactional traffic, like web sockets.
