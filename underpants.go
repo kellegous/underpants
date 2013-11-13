@@ -460,14 +460,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
   return m, nil
 }
 
-func addrFrom(c *conf, port int) string {
-  if port == 0 {
-    if c.HasCerts() {
-      return ":https"
-    }
-    return "http"
-  }
-
+func addrFrom(port int) string {
   switch port {
   case 80:
     return ":http"
@@ -499,8 +492,9 @@ func LoadCertificate(crtFile, keyFile string) (tls.Certificate, error) {
     return tls.X509KeyPair(crtBytes, keyBytes)
   }
 
-  fmt.Printf("Read Password: ")
+  fmt.Printf("%s\nPassword: ", keyFile)
   pwd, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+  fmt.Println()
   if err != nil {
     return tls.Certificate{}, err
   }
@@ -562,12 +556,19 @@ func main() {
     panic(err)
   }
 
+  if *flagPort == 0 {
+    if c.HasCerts() {
+      *flagPort = 443
+    } else {
+      *flagPort = 80
+    }
+  }
   m, err := setup(c, *flagPort)
   if err != nil {
     panic(err)
   }
 
-  if err := ListenAndServe(addrFrom(c, *flagPort), c, m); err != nil {
+  if err := ListenAndServe(addrFrom(*flagPort), c, m); err != nil {
     panic(err)
   }
 }
