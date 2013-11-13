@@ -2,18 +2,24 @@ package main
 
 import (
   "bytes"
+  "code.google.com/p/go.crypto/ssh/terminal"
   "code.google.com/p/goauth2/oauth"
   "crypto/hmac"
   "crypto/rand"
   "crypto/sha256"
+  "crypto/tls"
+  "crypto/x509"
   "encoding/base64"
   "encoding/json"
+  "encoding/pem"
   "errors"
   "flag"
   "fmt"
   "github.com/kellegous/lilcache"
   "html/template"
   "io"
+  "io/ioutil"
+  "net"
   "net/http"
   "net/url"
   "os"
@@ -21,8 +27,6 @@ import (
 )
 
 // TODO(knorton): allow websockets to pass.
-// TODO(knorton): add minimal ui to hub just to see who you are and
-//                perhaps who is passing.
 const (
   userCookieKey  = "u"
   authPathPrefix = "/__auth__/"
@@ -35,10 +39,30 @@ type conf struct {
     ClientSecret string `json:"client-secret"`
     Domain       string `json:"domain"`
   }
+  Certs []struct {
+    Crt string
+    Key string
+  }
   Routes []struct {
     From string
     To   string
   }
+}
+
+func (c *conf) HasCerts() bool {
+  return len(c.Certs) > 0
+}
+
+func (c *conf) Scheme() string {
+  if len(c.Certs) > 0 {
+    return "https"
+  }
+  return "http"
+}
+
+type route struct {
+  host   string
+  scheme string
 }
 
 type user struct {
@@ -99,20 +123,25 @@ func decodeUser(c string, key []byte) (*user, error) {
   return &u, nil
 }
 
+// Represents a route to a backend. This is fully immutable after construction and will
+// be shared among http serving go routines.
 type disp struct {
-  from   string
-  to     string
-  host   string
-  key    []byte
-  domain string
-  oauth  *oauth.Config
-  cache  *lilcache.Cache
+  // A copy of the original configuration
+  config *conf
+
+  // The host of the hub consistent with url.URL.Host, which is essentially the entire
+  // authority of the URL. Examples: hub.monetology.com or hub.monetology.com:4080
+  host  string
+  route *route
+  key   []byte
+  oauth *oauth.Config
+  cache *lilcache.Cache
 }
 
 func (d *disp) AuthCodeUrl(u *url.URL) string {
   return fmt.Sprintf("%s&%s",
     d.oauth.AuthCodeURL(u.String()),
-    url.Values{"hd": {d.domain}}.Encode())
+    url.Values{"hd": {d.config.Oauth.Domain}}.Encode())
 }
 
 func copyHeaders(dst, src http.Header) {
@@ -151,11 +180,10 @@ func userFrom(r *http.Request, cache *lilcache.Cache, key []byte) *user {
   return u
 }
 
-func urlFor(host string, r *http.Request) *url.URL {
+func urlFor(scheme, host string, r *http.Request) *url.URL {
   u := *r.URL
   u.Host = host
-  // TODO(knorton): Assume http for now.
-  u.Scheme = "http"
+  u.Scheme = scheme
   return &u
 }
 
@@ -163,12 +191,12 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
   u := userFrom(r, d.cache, d.key)
   if u == nil {
     http.Redirect(w, r,
-      d.AuthCodeUrl(urlFor(d.from, r)),
+      d.AuthCodeUrl(urlFor(d.config.Scheme(), d.host, r)),
       http.StatusFound)
     return
   }
 
-  br, err := http.NewRequest(r.Method, urlFor(d.to, r).String(), r.Body)
+  br, err := http.NewRequest(r.Method, urlFor(d.route.scheme, d.route.host, r).String(), r.Body)
   if err != nil {
     panic(err)
   }
@@ -245,7 +273,7 @@ func oauthConfig(c *conf, port int) *oauth.Config {
     AuthURL:      "https://accounts.google.com/o/oauth2/auth",
     TokenURL:     "https://accounts.google.com/o/oauth2/token",
     Scope:        "https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
-    RedirectURL:  fmt.Sprintf("http://%s%s", hostOf(c.Host, port), authPathPrefix),
+    RedirectURL:  fmt.Sprintf("%s://%s%s", c.Scheme(), hostOf(c.Host, port), authPathPrefix),
   }
 }
 
@@ -293,13 +321,17 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 
   // setup routes
   oc := oauthConfig(c, port)
-  for _, route := range c.Routes {
-    host := hostOf(route.From, port)
+  for _, r := range c.Routes {
+    host := hostOf(r.From, port)
+    uri, err := url.Parse(r.To)
+    if err != nil {
+      return nil, err
+    }
+
     m.Handle(fmt.Sprintf("%s/", host), &disp{
-      from:   host,
-      to:     route.To,
-      host:   c.Host,
-      domain: c.Oauth.Domain,
+      config: c,
+      route:  &route{host: uri.Host, scheme: uri.Scheme},
+      host:   host,
       key:    key,
       oauth:  oc,
       cache:  cache,
@@ -395,7 +427,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     }
 
     http.Redirect(w, r,
-      fmt.Sprintf("http://%s%s?%s", back.Host, authPathPrefix,
+      fmt.Sprintf("%s://%s%s?%s", c.Scheme(), back.Host, authPathPrefix,
         url.Values{
           "p": {p},
           "c": {v},
@@ -428,18 +460,99 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
   return m, nil
 }
 
-func addrFrom(port int) string {
+func addrFrom(c *conf, port int) string {
+  if port == 0 {
+    if c.HasCerts() {
+      return ":https"
+    }
+    return "http"
+  }
+
   switch port {
   case 80:
     return ":http"
   case 443:
     return ":https"
   }
+
   return fmt.Sprintf(":%d", port)
 }
 
+func LoadCertificate(crtFile, keyFile string) (tls.Certificate, error) {
+  crtBytes, err := ioutil.ReadFile(crtFile)
+  if err != nil {
+    return tls.Certificate{}, err
+  }
+
+  keyBytes, err := ioutil.ReadFile(keyFile)
+  if err != nil {
+    return tls.Certificate{}, err
+  }
+
+  keyDer, _ := pem.Decode(keyBytes)
+  if keyDer == nil {
+    return tls.Certificate{}, fmt.Errorf("%s cannot be decoded.", keyFile)
+  }
+
+  // http://www.ietf.org/rfc/rfc1421.txt
+  if !strings.HasPrefix(keyDer.Headers["Proc-Type"], "4,ENCRYPTED") {
+    return tls.X509KeyPair(crtBytes, keyBytes)
+  }
+
+  fmt.Printf("Read Password: ")
+  pwd, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+  if err != nil {
+    return tls.Certificate{}, err
+  }
+
+  keyDec, err := x509.DecryptPEMBlock(keyDer, pwd)
+  if err != nil {
+    return tls.Certificate{}, err
+  }
+
+  return tls.X509KeyPair(crtBytes, pem.EncodeToMemory(&pem.Block{
+    Type:    "RSA PRIVATE KEY",
+    Headers: map[string]string{},
+    Bytes:   keyDec,
+  }))
+}
+
+func ListenAndServe(addr string, cfg *conf, m *http.ServeMux) error {
+  if cfg.HasCerts() {
+    var certs []tls.Certificate
+    for _, item := range cfg.Certs {
+      crt, err := LoadCertificate(item.Crt, item.Key)
+      if err != nil {
+        return err
+      }
+
+      certs = append(certs, crt)
+    }
+
+    s := &http.Server{
+      Addr:    addr,
+      Handler: m,
+      TLSConfig: &tls.Config{
+        NextProtos:   []string{"http/1.1"},
+        Certificates: certs,
+      },
+    }
+
+    s.TLSConfig.BuildNameToCertificate()
+
+    conn, err := net.Listen("tcp", addr)
+    if err != nil {
+      return err
+    }
+
+    return s.Serve(tls.NewListener(conn, s.TLSConfig))
+  }
+
+  return http.ListenAndServe(addr, m)
+}
+
 func main() {
-  flagPort := flag.Int("port", 80, "")
+  flagPort := flag.Int("port", 0, "")
   flagConf := flag.String("conf", "underpants.json", "")
 
   flag.Parse()
@@ -454,7 +567,7 @@ func main() {
     panic(err)
   }
 
-  if err := http.ListenAndServe(addrFrom(*flagPort), m); err != nil {
+  if err := ListenAndServe(addrFrom(c, *flagPort), c, m); err != nil {
     panic(err)
   }
 }

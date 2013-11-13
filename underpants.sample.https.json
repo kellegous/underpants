@@ -1,0 +1,20 @@
+{
+  "host" : "underpants.company.com",
+  "oauth" : {
+    "domain"        : "company.com",
+    "client-id"     : "oauth-client-id",
+    "client-secret" : "oauth-client-secret"
+  },
+  "certs" : [
+    {
+      "crt" : "/path/to/crt.pem",
+      "key" : "/path/to/key.pem"
+    }
+  ],
+  "routes" : [
+    {
+      "from" : "public.company.com",
+      "to"   : "http://localhost:8080"
+    }
+  ]
+}

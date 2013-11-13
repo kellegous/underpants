@@ -1,5 +1,5 @@
 {
-  "host" : "entry.company.com",
+  "host" : "underpants.company.com",
   "oauth" : {
     "domain"        : "company.com",
     "client-id"     : "oauth-client-id",
@@ -8,7 +8,7 @@
   "routes" : [
     {
       "from" : "public.company.com",
-      "to"   : "localhost:8080"
+      "to"   : "http://localhost:8080"
     }
   ]
 }
