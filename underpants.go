@@ -19,6 +19,7 @@ import (
   "html/template"
   "io"
   "io/ioutil"
+  "log"
   "net"
   "net/http"
   "net/url"
@@ -158,6 +159,7 @@ func userFrom(r *http.Request, cache *lilcache.Cache, key []byte) *user {
     return nil
   }
 
+  log.Printf("Cookie: %s...", c.Value[:32])
   v, err := url.QueryUnescape(c.Value)
   if err != nil {
     return nil
@@ -165,14 +167,18 @@ func userFrom(r *http.Request, cache *lilcache.Cache, key []byte) *user {
 
   // check the cache
   if u, t := cache.Get(v); !t.IsZero() {
-    return u.(*user)
+    user := u.(*user)
+    log.Printf("  Cache Hit: %s", user.Email)
+    return user
   }
 
   u, err := decodeUser(v, key)
   if err != nil {
-    // TODO(knorton): log this.
+    log.Printf("  Rejected: %s...", c.Value[:32])
     return nil
   }
+
+  log.Printf("  Cache Miss: %s", u.Email)
 
   // this was a cache miss
   cache.Put(c.Value, u)
