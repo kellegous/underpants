@@ -252,10 +252,12 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
   }
 
   http.SetCookie(w, &http.Cookie{
-    Name:   userCookieKey,
-    Value:  url.QueryEscape(c),
-    Path:   "/",
-    MaxAge: 3600,
+    Name:     userCookieKey,
+    Value:    url.QueryEscape(c),
+    Path:     "/",
+    MaxAge:   3600,
+    HttpOnly: true,
+    Secure:   d.config.HasCerts(),
   })
 
   // TODO(knorton): validate the url string because it could totally
