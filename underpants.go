@@ -29,31 +29,57 @@ import (
 
 // TODO(knorton): allow websockets to pass.
 const (
-  userCookieKey  = "u"
+  // the name of the auth cookie
+  userCookieKey = "u"
+
+  // the base path used for auth-related actions and callbacks. this will be
+  // available on the hub as well as each of the routes.
   authPathPrefix = "/__auth__/"
 )
 
+// A configuration object that is loaded directly from the json config file.
 type conf struct {
-  Host  string
+  // The host (without the port specification) that will be acting as the hub
+  Host string
+
+  // Google OAuth related settings
   Oauth struct {
     ClientId     string `json:"client-id"`
     ClientSecret string `json:"client-secret"`
     Domain       string `json:"domain"`
   }
+
+  // TLS certificiate files to enable https on the hub and endpoints. TLS is highly
+  // recommended and it is global. You cannot run some routes over HTTP and others over
+  // HTTPS. If you need to do this, you should use two instances of underpants (one on
+  // port 80 and the other on 443).
   Certs []struct {
     Crt string
     Key string
   }
+
+  // The mappings from hostname to backend server.
   Routes []struct {
+
+    // The hostname (excluding port) for the public facing hostname.
     From string
-    To   string
+
+    // The base authority (i.e. http://backend.example.com:8080) for the backend. Backends
+    // can be referenced through either http:// or https:// base urls. If you provide a
+    // non-root (i.e. http://example.com/foo/bar/) URL, the path of the URL will be
+    // discarded.
+    To string
   }
 }
 
+// Used to dermine if the instance is running over HTTP or HTTPS, this indicates whether
+// any certificates were included in the configuration.
 func (c *conf) HasCerts() bool {
   return len(c.Certs) > 0
 }
 
+// A convience method for getting the relevant scheme based on whether certificates were
+// included in the configuration.
 func (c *conf) Scheme() string {
   if len(c.Certs) > 0 {
     return "https"
@@ -61,17 +87,21 @@ func (c *conf) Scheme() string {
   return "http"
 }
 
+// Represents the end-point for a backend. This is used at runtime to dispatch requests.
 type route struct {
   host   string
   scheme string
 }
 
+// A user (as represented by Google OAuth)
 type user struct {
   Email   string
   Name    string
   Picture string
 }
 
+// Encode the full user object as a base64 string that is suitable for including in
+// the cookie.
 func (u *user) encode(key []byte) (string, error) {
   var b bytes.Buffer
   h := hmac.New(sha256.New, key)
@@ -86,6 +116,7 @@ func (u *user) encode(key []byte) (string, error) {
     b.String()), nil
 }
 
+// Validates an HMAC signed message using the specified key.
 func validMessage(key []byte, sig, msg string) bool {
   s, err := base64.URLEncoding.DecodeString(sig)
   if err != nil {
@@ -108,6 +139,8 @@ func validMessage(key []byte, sig, msg string) bool {
   return true
 }
 
+// Using a key (for validation) and a base64 encoded string, re-construct the encoded
+// user that it represents.
 func decodeUser(c string, key []byte) (*user, error) {
   s := strings.SplitN(c, ",", 2)
 
@@ -132,10 +165,19 @@ type disp struct {
 
   // The host of the hub consistent with url.URL.Host, which is essentially the entire
   // authority of the URL. Examples: hub.monetology.com or hub.monetology.com:4080
-  host  string
+  host string
+
+  // The route to the relevant backend
   route *route
-  key   []byte
+
+  // The signing key to use for authenticity
+  key []byte
+
+  // The OAuth configuration object needed for authentication.
   oauth *oauth.Config
+
+  // An LRU cache that maps raw cookie strings to full user object. This avoids having
+  // to authenticate and decode user cookies on each request.
   cache *lilcache.Cache
 }
 
