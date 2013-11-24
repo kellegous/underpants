@@ -181,12 +181,15 @@ type disp struct {
   cache *lilcache.Cache
 }
 
+// Construct a URL to the oauth provider that with carry the provided URL as state
+// through the authentication process.
 func (d *disp) AuthCodeUrl(u *url.URL) string {
   return fmt.Sprintf("%s&%s",
     d.oauth.AuthCodeURL(u.String()),
     url.Values{"hd": {d.config.Oauth.Domain}}.Encode())
 }
 
+// Copy the HTTP headers from one collection to another.
 func copyHeaders(dst, src http.Header) {
   for key, vals := range src {
     for _, val := range vals {
@@ -195,6 +198,10 @@ func copyHeaders(dst, src http.Header) {
   }
 }
 
+// Extract a user object from the http request. The cache is used to avoid full
+// decoding and verificaiton of a cookie by mapping raw cookie values to fully
+// decoded user objects in the cache. The key is used for HMAC signature
+// verification.
 func userFrom(r *http.Request, cache *lilcache.Cache, key []byte) *user {
   c, err := r.Cookie(userCookieKey)
   if err != nil || c.Value == "" {
@@ -228,6 +235,8 @@ func userFrom(r *http.Request, cache *lilcache.Cache, key []byte) *user {
   return u
 }
 
+// Find the rewritten URL for a request that is being proxied along a route to a
+// backend defined by the scheme and host.
 func urlFor(scheme, host string, r *http.Request) *url.URL {
   u := *r.URL
   u.Host = host
@@ -235,6 +244,7 @@ func urlFor(scheme, host string, r *http.Request) *url.URL {
   return &u
 }
 
+// Serve the response by proxying it to the backend represented by the disp object.
 func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
   u := userFrom(r, d.cache, d.key)
   if u == nil {
@@ -255,6 +265,7 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 
   copyHeaders(br.Header, r.Header)
 
+  // User information is passed to backends as headers.
   br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
   br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
 
@@ -272,6 +283,7 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
   }
 }
 
+// Serve the request as an authentication request.
 func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
   c, p := r.FormValue("c"), r.FormValue("p")
   if c == "" || !strings.HasPrefix(p, "/") {
@@ -307,6 +319,7 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
   http.Redirect(w, r, p, http.StatusFound)
 }
 
+// Serve the request for a particular route.
 func (d *disp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
   p := r.URL.Path
   if strings.HasPrefix(p, authPathPrefix) {
@@ -316,6 +329,7 @@ func (d *disp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
   }
 }
 
+// Construct an OAuth configuration object.
 func oauthConfig(c *conf, port int) *oauth.Config {
   return &oauth.Config{
     ClientId:     c.Oauth.ClientId,
@@ -327,6 +341,7 @@ func oauthConfig(c *conf, port int) *oauth.Config {
   }
 }
 
+// Load the configuration objects from the given filename.
 func config(filename string) (*conf, error) {
   f, err := os.Open(filename)
   if err != nil {
@@ -342,6 +357,10 @@ func config(filename string) (*conf, error) {
   return &c, nil
 }
 
+// Generate a new random key for HMAC signing. Server keys are completely emphemeral
+// in that the key is generated at server startup and not persisted between restarts.
+// This means all cookies are invalidated just by restarting the server. This is
+// generally desirable since it is "easy" for clients to re-authenticate with OAuth.
 func newKey() ([]byte, error) {
   var b bytes.Buffer
   if _, err := io.CopyN(&b, rand.Reader, 64); err != nil {
@@ -351,6 +370,8 @@ func newKey() ([]byte, error) {
   return b.Bytes(), nil
 }
 
+// Construct a proper hostname (name:port) but taking into account standard ports
+// where the port specification should be omitted.
 func hostOf(name string, port int) string {
   switch port {
   case 80, 443:
@@ -359,14 +380,17 @@ func hostOf(name string, port int) string {
   return fmt.Sprintf("%s:%d", name, port)
 }
 
+// Setup all handlers in a ServeMux.
 func setup(c *conf, port int) (*http.ServeMux, error) {
   m := http.NewServeMux()
 
+  // Construct the HMAC signing key
   key, err := newKey()
   if err != nil {
     return nil, err
   }
 
+  // Construct a new LRU cookie/user cache
   cache := lilcache.New(50)
 
   // setup routes
@@ -388,6 +412,8 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     })
   }
 
+  // load the template for the one piece of static content embedded in
+  // the server
   t := template.Must(template.New("index.html").Parse(rootTmpl))
 
   // setup admin
@@ -510,6 +536,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
   return m, nil
 }
 
+// Determine the addr specification that will be passed to a net.Listener.
 func addrFrom(port int) string {
   switch port {
   case 80:
@@ -521,6 +548,9 @@ func addrFrom(port int) string {
   return fmt.Sprintf(":%d", port)
 }
 
+// Load the TLS certificate from the speciified files. The key file can be an encryped
+// PEM so long as it carries the appropriate headers (Proc-Type and Dek-Info) and the
+// password will be requested interactively.
 func LoadCertificate(crtFile, keyFile string) (tls.Certificate, error) {
   crtBytes, err := ioutil.ReadFile(crtFile)
   if err != nil {
@@ -561,6 +591,7 @@ func LoadCertificate(crtFile, keyFile string) (tls.Certificate, error) {
   }))
 }
 
+// Bind the listening port and start serving traffic.
 func ListenAndServe(addr string, cfg *conf, m *http.ServeMux) error {
   if cfg.HasCerts() {
     var certs []tls.Certificate
