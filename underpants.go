@@ -7,6 +7,7 @@ import (
   "crypto/hmac"
   "crypto/rand"
   "crypto/sha256"
+  "crypto/subtle"
   "crypto/tls"
   "crypto/x509"
   "encoding/base64"
@@ -130,10 +131,8 @@ func validMessage(key []byte, sig, msg string) bool {
     return false
   }
 
-  for i := 0; i < len(s); i++ {
-    if s[i] != v[i] {
-      return false
-    }
+  if subtle.ConstantTimeCompare(s, v) != 1 {
+    return false;
   }
 
   return true
