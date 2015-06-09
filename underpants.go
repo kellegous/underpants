@@ -268,8 +268,7 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
   br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
   br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
 
-  c := http.Client{}
-  bp, err := c.Do(br)
+  bp, err := http.DefaultTransport.RoundTrip(br)
   if err != nil {
     panic(err)
   }
