@@ -473,7 +473,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     }
 
     // this only happens when someone edits the auth url
-    if !strings.HasSuffix(u.Email, c.Oauth.Domain) {
+    if !strings.HasSuffix(u.Email, "@" + c.Oauth.Domain) {
       http.Error(w,
         http.StatusText(http.StatusForbidden),
         http.StatusForbidden)
