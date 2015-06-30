@@ -16,7 +16,6 @@ import (
   "errors"
   "flag"
   "fmt"
-  "github.com/kellegous/lilcache"
   "html/template"
   "io"
   "io/ioutil"
@@ -186,10 +185,6 @@ type disp struct {
 
   // The OAuth configuration object needed for authentication.
   oauth *oauth.Config
-
-  // An LRU cache that maps raw cookie strings to full user object. This avoids having
-  // to authenticate and decode user cookies on each request.
-  cache *lilcache.Cache
 }
 
 // Construct a URL to the oauth provider that with carry the provided URL as state
@@ -209,11 +204,9 @@ func copyHeaders(dst, src http.Header) {
   }
 }
 
-// Extract a user object from the http request. The cache is used to avoid full
-// decoding and verificaiton of a cookie by mapping raw cookie values to fully
-// decoded user objects in the cache. The key is used for HMAC signature
-// verification.
-func userFrom(r *http.Request, cache *lilcache.Cache, key []byte) *user {
+// Extract a user object from the http request.  The key is used for HMAC
+// signature verification.
+func userFrom(r *http.Request, key []byte) *user {
   c, err := r.Cookie(userCookieKey)
   if err != nil || c.Value == "" {
     return nil
@@ -225,23 +218,11 @@ func userFrom(r *http.Request, cache *lilcache.Cache, key []byte) *user {
     return nil
   }
 
-  // check the cache
-  if u, t := cache.Get(v); !t.IsZero() {
-    user := u.(*user)
-    log.Printf("  Cache Hit: %s", user.Email)
-    return user
-  }
-
   u, err := decodeUser(v, key)
   if err != nil {
     log.Printf("  Rejected: %s...", c.Value[:32])
     return nil
   }
-
-  log.Printf("  Cache Miss: %s", u.Email)
-
-  // this was a cache miss
-  cache.Put(c.Value, u)
 
   return u
 }
@@ -257,7 +238,7 @@ func urlFor(scheme, host string, r *http.Request) *url.URL {
 
 // Serve the response by proxying it to the backend represented by the disp object.
 func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
-  u := userFrom(r, d.cache, d.key)
+  u := userFrom(r, d.key)
   if u == nil {
     http.Redirect(w, r,
       d.AuthCodeUrl(urlFor(d.config.Scheme(), d.host, r)),
@@ -304,15 +285,13 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
   }
 
   // verify the cookie
-  if _, t := d.cache.Get(c); t.IsZero() {
-    if _, err := decodeUser(c, d.key); err != nil {
-      // do not redirect out of here because this indicates a big
-      // problem and we're likely to get into a redir loop.
-      http.Error(w,
-        http.StatusText(http.StatusForbidden),
-        http.StatusForbidden)
-      return
-    }
+  if _, err := decodeUser(c, d.key); err != nil {
+    // do not redirect out of here because this indicates a big
+    // problem and we're likely to get into a redir loop.
+    http.Error(w,
+      http.StatusText(http.StatusForbidden),
+      http.StatusForbidden)
+    return
   }
 
   http.SetCookie(w, &http.Cookie{
@@ -400,9 +379,6 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     return nil, err
   }
 
-  // Construct a new LRU cookie/user cache
-  cache := lilcache.New(50)
-
   // setup routes
   oc := oauthConfig(c, port)
   for _, r := range c.Routes {
@@ -418,7 +394,6 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
       host:   host,
       key:    key,
       oauth:  oc,
-      cache:  cache,
     })
   }
 
@@ -430,7 +405,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
   m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
     switch r.URL.Path {
     case "/":
-      u := userFrom(r, cache, key)
+      u := userFrom(r, key)
       w.Header().Set("Content-Type", "text/html;charset=utf-8")
       if debugTmpl {
         t, err := template.ParseFiles("index.html")
@@ -496,9 +471,6 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     if err != nil {
       panic(err)
     }
-
-    // keep this in cache for quick verification
-    cache.Put(v, &u)
 
     http.SetCookie(w, &http.Cookie{
       Name:     userCookieKey,
