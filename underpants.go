@@ -489,10 +489,12 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     cache.Put(v, &u)
 
     http.SetCookie(w, &http.Cookie{
-      Name:   userCookieKey,
-      Value:  url.QueryEscape(v),
-      Path:   "/",
-      MaxAge: 3600,
+      Name:     userCookieKey,
+      Value:    url.QueryEscape(v),
+      Path:     "/",
+      MaxAge:   3600,
+      HttpOnly: true,
+      Secure:   d.config.HasCerts(),
     })
 
     p := back.Path
