@@ -494,7 +494,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
       Path:     "/",
       MaxAge:   3600,
       HttpOnly: true,
-      Secure:   d.config.HasCerts(),
+      Secure:   c.HasCerts(),
     })
 
     p := back.Path
