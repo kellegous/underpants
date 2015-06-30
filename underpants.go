@@ -26,6 +26,7 @@ import (
   "net/url"
   "os"
   "strings"
+  "time"
 )
 
 // TODO(knorton): allow websockets to pass.
@@ -36,6 +37,10 @@ const (
   // the base path used for auth-related actions and callbacks. this will be
   // available on the hub as well as each of the routes.
   authPathPrefix = "/__auth__/"
+
+  // maximum age (in seconds) of an authorization cookie before we'll force
+  // revalidation
+  authMaxAge = 3600
 )
 
 // A configuration object that is loaded directly from the json config file.
@@ -96,9 +101,10 @@ type route struct {
 
 // A user (as represented by Google OAuth)
 type user struct {
-  Email   string
-  Name    string
-  Picture string
+  Email             string
+  Name              string
+  Picture           string
+  LastAuthenticated time.Time
 }
 
 // Encode the full user object as a base64 string that is suitable for including in
@@ -151,6 +157,12 @@ func decodeUser(c string, key []byte) (*user, error) {
   r := base64.NewDecoder(base64.URLEncoding, bytes.NewBufferString(s[1]))
   if err := json.NewDecoder(r).Decode(&u); err != nil {
     return nil, err
+  }
+
+  now := time.Now()
+  age := now.Sub(u.LastAuthenticated)
+  if age.Seconds() >= authMaxAge {
+    return nil, errors.New(fmt.Sprintf("Cookie too old for: %s", u.Email))
   }
 
   return &u, nil
@@ -307,7 +319,7 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
     Name:     userCookieKey,
     Value:    url.QueryEscape(c),
     Path:     "/",
-    MaxAge:   3600,
+    MaxAge:   authMaxAge,
     HttpOnly: true,
     Secure:   d.config.HasCerts(),
   })
@@ -467,7 +479,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     }
     defer res.Body.Close()
 
-    u := user{}
+    u := user{ LastAuthenticated: time.Now() }
     if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
       panic(err)
     }
@@ -492,7 +504,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
       Name:     userCookieKey,
       Value:    url.QueryEscape(v),
       Path:     "/",
-      MaxAge:   3600,
+      MaxAge:   authMaxAge,
       HttpOnly: true,
       Secure:   c.HasCerts(),
     })
