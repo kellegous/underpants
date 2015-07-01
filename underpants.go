@@ -54,6 +54,17 @@ type conf struct {
     Domain       string `json:"domain"`
   }
 
+  // Whether or not to add a set of security headers to all HTTP responses:
+  //
+  //    Strict-Transport-Security -- if certs are present, enforce HTTPS
+  //    Cache-Control: private, no-cache -- prevent downstream caching
+  //    Pragma: no-cache -- prevent HTTP/1.0 downstream caching
+  //    X-Frame-Options: SAMEORIGIN -- prevent clickjacking
+  //
+  // Enable this if it your applications are OK with it and you want additional
+  // security.
+  AddSecurityHeaders bool `json:"use-strict-security-headers"`
+
   // TLS certificiate files to enable https on the hub and endpoints. TLS is highly
   // recommended and it is global. You cannot run some routes over HTTP and others over
   // HTTPS. If you need to do this, you should use two instances of underpants (one on
@@ -370,6 +381,27 @@ func hostOf(name string, port int) string {
   return fmt.Sprintf("%s:%d", name, port)
 }
 
+func addSecurityHeaders(c *conf, next http.Handler) http.Handler {
+  if c.AddSecurityHeaders {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+      if c.HasCerts() {
+        w.Header().Add("Strict-Transport-Security", "max-age=16070400; includeSubDomains")
+      }
+
+      w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+      w.Header().Add("Cache-Control", "private, no-cache")
+      w.Header().Add("Pragma", "no-cache")
+      next.ServeHTTP(w, r)
+    })
+  } else {
+    return next
+  }
+}
+
+func addSecurityHeadersFunc(c *conf, next func(http.ResponseWriter, *http.Request)) http.Handler {
+  return addSecurityHeaders(c, http.HandlerFunc(next))
+}
+
 // Setup all handlers in a ServeMux.
 func setup(c *conf, port int) (*http.ServeMux, error) {
   m := http.NewServeMux()
@@ -389,13 +421,13 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
       return nil, err
     }
 
-    m.Handle(fmt.Sprintf("%s/", host), &disp{
+    m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(c, &disp{
       config: c,
       route:  &route{host: uri.Host, scheme: uri.Scheme},
       host:   host,
       key:    key,
       oauth:  oc,
-    })
+    }))
   }
 
   // load the template for the one piece of static content embedded in
@@ -403,7 +435,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
   t := template.Must(template.New("index.html").Parse(rootTmpl))
 
   // setup admin
-  m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+  m.Handle("/", addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
     switch r.URL.Path {
     case "/":
       u := userFrom(r, key)
@@ -420,9 +452,9 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     default:
       http.NotFound(w, r)
     }
-  })
+  }))
 
-  m.HandleFunc(authPathPrefix, func(w http.ResponseWriter, r *http.Request) {
+  m.Handle(authPathPrefix, addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
     code := r.FormValue("code")
     stat := r.FormValue("state")
     if code == "" || stat == "" {
@@ -494,11 +526,11 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
           "c": {v},
         }.Encode()),
       http.StatusFound)
-  })
+  }))
 
-  m.HandleFunc(
+  m.Handle(
     fmt.Sprintf("%slogout", authPathPrefix),
-    func(w http.ResponseWriter, r *http.Request) {
+    addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
       if r.Method != "POST" {
         http.Error(w,
           http.StatusText(http.StatusMethodNotAllowed),
@@ -516,7 +548,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
       // TODO(knorton): Convert this to simple html page
       w.Header().Set("Content-Type", "text/plain")
       fmt.Fprintln(w, "ok.")
-    })
+    }))
 
   return m, nil
 }
