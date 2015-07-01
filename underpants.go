@@ -13,7 +13,6 @@ import (
   "encoding/base64"
   "encoding/json"
   "encoding/pem"
-  "errors"
   "flag"
   "fmt"
   "html/template"
@@ -161,7 +160,7 @@ func decodeUser(c string, key []byte) (*user, error) {
   s := strings.SplitN(c, ",", 2)
 
   if len(s) != 2 || !validMessage(key, s[0], s[1]) {
-    return nil, errors.New(fmt.Sprintf("Invalid user cookie: %s", c))
+    return nil, fmt.Errorf("Invalid user cookie: %s", c)
   }
 
   var u user
@@ -173,7 +172,7 @@ func decodeUser(c string, key []byte) (*user, error) {
   now := time.Now()
   age := now.Sub(u.LastAuthenticated)
   if age.Seconds() >= authMaxAge {
-    return nil, errors.New(fmt.Sprintf("Cookie too old for: %s", u.Email))
+    return nil, fmt.Errorf("Cookie too old for: %s", u.Email)
   }
 
   return &u, nil
