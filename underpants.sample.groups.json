@@ -1,0 +1,33 @@
+{
+  "host" : "underpants.company.com",
+  "oauth" : {
+    "domain"        : "company.com",
+    "client-id"     : "oauth-client-id",
+    "client-secret" : "oauth-client-secret"
+  },
+  "use-strict-security-headers": true,
+  "groups": {
+    "supersecret": [
+      "a@company.com",
+      "b@company.com"
+    ]
+  },
+  "certs" : [
+    {
+      "crt" : "/path/to/crt.pem",
+      "key" : "/path/to/key.pem"
+    }
+  ],
+  "routes" : [
+    {
+      "from"           : "public.company.com",
+      "to"             : "http://localhost:8080",
+      "allowed-groups" : ["*"]
+    },
+    {
+      "from"           : "sensitive.company.com",
+      "to"             : "http://localhost:8081",
+      "allowed-groups" : ["supersecret"]
+    },
+  ]
+}

@@ -46,6 +46,12 @@ If your configuration can stomach it, enable `use-strict-security-headers` to
 get some extra peace of mind.  This will block clickjacking, disable downstream
 HTTP caching, and turn on `Strict-Transport-Security` if HTTPS.
 
+For more granular access control, you can configure groups and their membership
+in the JSON file.  Once groups are configured, routes will deny all users who
+are not a member of one of the authorized groups by default.  The special `*`
+group can be used to allow any authenticated user access to the route.  See
+`underpants.sample.groups.json` for a configuration sample.
+
 ## Running
 
 Just run it; it's an executable.
