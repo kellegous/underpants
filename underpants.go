@@ -13,10 +13,8 @@ import (
   "encoding/base64"
   "encoding/json"
   "encoding/pem"
-  "errors"
   "flag"
   "fmt"
-  "github.com/kellegous/lilcache"
   "html/template"
   "io"
   "io/ioutil"
@@ -26,6 +24,7 @@ import (
   "net/url"
   "os"
   "strings"
+  "time"
 )
 
 // TODO(knorton): allow websockets to pass.
@@ -36,6 +35,10 @@ const (
   // the base path used for auth-related actions and callbacks. this will be
   // available on the hub as well as each of the routes.
   authPathPrefix = "/__auth__/"
+
+  // maximum age (in seconds) of an authorization cookie before we'll force
+  // revalidation
+  authMaxAge = 3600
 )
 
 // A configuration object that is loaded directly from the json config file.
@@ -49,6 +52,17 @@ type conf struct {
     ClientSecret string `json:"client-secret"`
     Domain       string `json:"domain"`
   }
+
+  // Whether or not to add a set of security headers to all HTTP responses:
+  //
+  //    Strict-Transport-Security -- if certs are present, enforce HTTPS
+  //    Cache-Control: private, no-cache -- prevent downstream caching
+  //    Pragma: no-cache -- prevent HTTP/1.0 downstream caching
+  //    X-Frame-Options: SAMEORIGIN -- prevent clickjacking
+  //
+  // Enable this if it your applications are OK with it and you want additional
+  // security.
+  AddSecurityHeaders bool `json:"use-strict-security-headers"`
 
   // TLS certificiate files to enable https on the hub and endpoints. TLS is highly
   // recommended and it is global. You cannot run some routes over HTTP and others over
@@ -96,9 +110,10 @@ type route struct {
 
 // A user (as represented by Google OAuth)
 type user struct {
-  Email   string
-  Name    string
-  Picture string
+  Email             string
+  Name              string
+  Picture           string
+  LastAuthenticated time.Time
 }
 
 // Encode the full user object as a base64 string that is suitable for including in
@@ -111,6 +126,7 @@ func (u *user) encode(key []byte) (string, error) {
   if err := json.NewEncoder(w).Encode(u); err != nil {
     return "", err
   }
+  w.Close()
 
   return fmt.Sprintf("%s,%s",
     base64.URLEncoding.EncodeToString(h.Sum(nil)),
@@ -144,13 +160,19 @@ func decodeUser(c string, key []byte) (*user, error) {
   s := strings.SplitN(c, ",", 2)
 
   if len(s) != 2 || !validMessage(key, s[0], s[1]) {
-    return nil, errors.New(fmt.Sprintf("Invalid user cookie: %s", c))
+    return nil, fmt.Errorf("Invalid user cookie: %s", c)
   }
 
   var u user
   r := base64.NewDecoder(base64.URLEncoding, bytes.NewBufferString(s[1]))
   if err := json.NewDecoder(r).Decode(&u); err != nil {
     return nil, err
+  }
+
+  now := time.Now()
+  age := now.Sub(u.LastAuthenticated)
+  if age.Seconds() >= authMaxAge {
+    return nil, fmt.Errorf("Cookie too old for: %s", u.Email)
   }
 
   return &u, nil
@@ -174,10 +196,6 @@ type disp struct {
 
   // The OAuth configuration object needed for authentication.
   oauth *oauth.Config
-
-  // An LRU cache that maps raw cookie strings to full user object. This avoids having
-  // to authenticate and decode user cookies on each request.
-  cache *lilcache.Cache
 }
 
 // Construct a URL to the oauth provider that with carry the provided URL as state
@@ -197,11 +215,9 @@ func copyHeaders(dst, src http.Header) {
   }
 }
 
-// Extract a user object from the http request. The cache is used to avoid full
-// decoding and verificaiton of a cookie by mapping raw cookie values to fully
-// decoded user objects in the cache. The key is used for HMAC signature
-// verification.
-func userFrom(r *http.Request, cache *lilcache.Cache, key []byte) *user {
+// Extract a user object from the http request.  The key is used for HMAC
+// signature verification.
+func userFrom(r *http.Request, key []byte) *user {
   c, err := r.Cookie(userCookieKey)
   if err != nil || c.Value == "" {
     return nil
@@ -213,23 +229,11 @@ func userFrom(r *http.Request, cache *lilcache.Cache, key []byte) *user {
     return nil
   }
 
-  // check the cache
-  if u, t := cache.Get(v); !t.IsZero() {
-    user := u.(*user)
-    log.Printf("  Cache Hit: %s", user.Email)
-    return user
-  }
-
   u, err := decodeUser(v, key)
   if err != nil {
     log.Printf("  Rejected: %s...", c.Value[:32])
     return nil
   }
-
-  log.Printf("  Cache Miss: %s", u.Email)
-
-  // this was a cache miss
-  cache.Put(c.Value, u)
 
   return u
 }
@@ -245,7 +249,7 @@ func urlFor(scheme, host string, r *http.Request) *url.URL {
 
 // Serve the response by proxying it to the backend represented by the disp object.
 func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
-  u := userFrom(r, d.cache, d.key)
+  u := userFrom(r, d.key)
   if u == nil {
     http.Redirect(w, r,
       d.AuthCodeUrl(urlFor(d.config.Scheme(), d.host, r)),
@@ -292,22 +296,20 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
   }
 
   // verify the cookie
-  if _, t := d.cache.Get(c); t.IsZero() {
-    if _, err := decodeUser(c, d.key); err != nil {
-      // do not redirect out of here because this indicates a big
-      // problem and we're likely to get into a redir loop.
-      http.Error(w,
-        http.StatusText(http.StatusForbidden),
-        http.StatusForbidden)
-      return
-    }
+  if _, err := decodeUser(c, d.key); err != nil {
+    // do not redirect out of here because this indicates a big
+    // problem and we're likely to get into a redir loop.
+    http.Error(w,
+      http.StatusText(http.StatusForbidden),
+      http.StatusForbidden)
+    return
   }
 
   http.SetCookie(w, &http.Cookie{
     Name:     userCookieKey,
     Value:    url.QueryEscape(c),
     Path:     "/",
-    MaxAge:   3600,
+    MaxAge:   authMaxAge,
     HttpOnly: true,
     Secure:   d.config.HasCerts(),
   })
@@ -378,6 +380,27 @@ func hostOf(name string, port int) string {
   return fmt.Sprintf("%s:%d", name, port)
 }
 
+func addSecurityHeaders(c *conf, next http.Handler) http.Handler {
+  if c.AddSecurityHeaders {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+      if c.HasCerts() {
+        w.Header().Add("Strict-Transport-Security", "max-age=16070400; includeSubDomains")
+      }
+
+      w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+      w.Header().Add("Cache-Control", "private, no-cache")
+      w.Header().Add("Pragma", "no-cache")
+      next.ServeHTTP(w, r)
+    })
+  } else {
+    return next
+  }
+}
+
+func addSecurityHeadersFunc(c *conf, next func(http.ResponseWriter, *http.Request)) http.Handler {
+  return addSecurityHeaders(c, http.HandlerFunc(next))
+}
+
 // Setup all handlers in a ServeMux.
 func setup(c *conf, port int) (*http.ServeMux, error) {
   m := http.NewServeMux()
@@ -388,9 +411,6 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     return nil, err
   }
 
-  // Construct a new LRU cookie/user cache
-  cache := lilcache.New(50)
-
   // setup routes
   oc := oauthConfig(c, port)
   for _, r := range c.Routes {
@@ -400,14 +420,13 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
       return nil, err
     }
 
-    m.Handle(fmt.Sprintf("%s/", host), &disp{
+    m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(c, &disp{
       config: c,
       route:  &route{host: uri.Host, scheme: uri.Scheme},
       host:   host,
       key:    key,
       oauth:  oc,
-      cache:  cache,
-    })
+    }))
   }
 
   // load the template for the one piece of static content embedded in
@@ -415,10 +434,10 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
   t := template.Must(template.New("index.html").Parse(rootTmpl))
 
   // setup admin
-  m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+  m.Handle("/", addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
     switch r.URL.Path {
     case "/":
-      u := userFrom(r, cache, key)
+      u := userFrom(r, key)
       w.Header().Set("Content-Type", "text/html;charset=utf-8")
       if debugTmpl {
         t, err := template.ParseFiles("index.html")
@@ -432,9 +451,9 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     default:
       http.NotFound(w, r)
     }
-  })
+  }))
 
-  m.HandleFunc(authPathPrefix, func(w http.ResponseWriter, r *http.Request) {
+  m.Handle(authPathPrefix, addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
     code := r.FormValue("code")
     stat := r.FormValue("state")
     if code == "" || stat == "" {
@@ -467,7 +486,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
     }
     defer res.Body.Close()
 
-    u := user{}
+    u := user{ LastAuthenticated: time.Now() }
     if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
       panic(err)
     }
@@ -485,14 +504,11 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
       panic(err)
     }
 
-    // keep this in cache for quick verification
-    cache.Put(v, &u)
-
     http.SetCookie(w, &http.Cookie{
       Name:     userCookieKey,
       Value:    url.QueryEscape(v),
       Path:     "/",
-      MaxAge:   3600,
+      MaxAge:   authMaxAge,
       HttpOnly: true,
       Secure:   c.HasCerts(),
     })
@@ -509,11 +525,11 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
           "c": {v},
         }.Encode()),
       http.StatusFound)
-  })
+  }))
 
-  m.HandleFunc(
+  m.Handle(
     fmt.Sprintf("%slogout", authPathPrefix),
-    func(w http.ResponseWriter, r *http.Request) {
+    addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
       if r.Method != "POST" {
         http.Error(w,
           http.StatusText(http.StatusMethodNotAllowed),
@@ -531,7 +547,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
       // TODO(knorton): Convert this to simple html page
       w.Header().Set("Content-Type", "text/plain")
       fmt.Fprintln(w, "ok.")
-    })
+    }))
 
   return m, nil
 }

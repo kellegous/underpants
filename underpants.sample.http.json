@@ -5,6 +5,7 @@
     "client-id"     : "oauth-client-id",
     "client-secret" : "oauth-client-secret"
   },
+  "use-strict-security-headers": true,
   "routes" : [
     {
       "from" : "public.company.com",
