@@ -116,6 +116,7 @@ func (u *user) encode(key []byte) (string, error) {
   if err := json.NewEncoder(w).Encode(u); err != nil {
     return "", err
   }
+  w.Close()
 
   return fmt.Sprintf("%s,%s",
     base64.URLEncoding.EncodeToString(h.Sum(nil)),
