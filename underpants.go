@@ -316,8 +316,8 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
   br.Host = r.Host
 
   // User information is passed to backends as headers.
-  br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
-  br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
+  br.Header.Set("Underpants-Email", url.QueryEscape(u.Email))
+  br.Header.Set("Underpants-Name", url.QueryEscape(u.Name))
 
   bp, err := http.DefaultTransport.RoundTrip(br)
   if err != nil {
