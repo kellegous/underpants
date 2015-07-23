@@ -340,7 +340,8 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 
   bp, err := http.DefaultTransport.RoundTrip(br)
   if err != nil {
-    panic(err)
+    http.Error(w, "failed to get valid response from internal service", 503)
+    return
   }
   defer bp.Body.Close()
 
