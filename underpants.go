@@ -312,6 +312,9 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 
   copyHeaders(br.Header, r.Header)
 
+  // Proxy the Host header so the downstream knows how to generate useful URLs
+  br.Host = r.Host
+
   // User information is passed to backends as headers.
   br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
   br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
