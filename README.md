@@ -36,7 +36,7 @@ Your underpants are configured through a silly little JSON file. Here's an examp
 }
 </pre>
 
-The `certs` section is optional and its absense will cause your underpants proxy to operate on pure HTTP. The key file may be encrypted so
+The `certs` section is optional and its absence will cause your underpants proxy to operate on pure HTTP. The key file may be encrypted so
 long as it is in encrypted PEM format with proper `Proc-Type` and `Dek-Info` headers. If you do not know what that means, just use openssl
 and that is what you will end up with.
 
