@@ -671,6 +671,13 @@ func ListenAndServe(addr string, cfg *conf, m *http.ServeMux) error {
       TLSConfig: &tls.Config{
         NextProtos:   []string{"http/1.1"},
         Certificates: certs,
+		MinVersion: tls.VersionTLS10,
+		CipherSuites: []uint16 {
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+		},
+		PreferServerCipherSuites: true,
       },
     }
 
