@@ -1,404 +1,409 @@
 package main
 
 import (
-  "bytes"
-  "code.google.com/p/go.crypto/ssh/terminal"
-  "code.google.com/p/goauth2/oauth"
-  "crypto/hmac"
-  "crypto/rand"
-  "crypto/sha256"
-  "crypto/subtle"
-  "crypto/tls"
-  "crypto/x509"
-  "encoding/base64"
-  "encoding/json"
-  "encoding/pem"
-  "flag"
-  "fmt"
-  "html/template"
-  "io"
-  "io/ioutil"
-  "log"
-  "net"
-  "net/http"
-  "net/url"
-  "os"
-  "strings"
-  "time"
+	"bytes"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
+	"flag"
+	"fmt"
+	"html/template"
+	"io"
+	"io/ioutil"
+	"log"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/net/context"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
 
 // TODO(knorton): allow websockets to pass.
 const (
-  // the name of the auth cookie
-  userCookieKey = "u"
+	// the name of the auth cookie
+	userCookieKey = "u"
 
-  // the base path used for auth-related actions and callbacks. this will be
-  // available on the hub as well as each of the routes.
-  authPathPrefix = "/__auth__/"
+	// the base path used for auth-related actions and callbacks. this will be
+	// available on the hub as well as each of the routes.
+	authPathPrefix = "/__auth__/"
 
-  // maximum age (in seconds) of an authorization cookie before we'll force
-  // revalidation
-  authMaxAge = 3600
+	// maximum age (in seconds) of an authorization cookie before we'll force
+	// revalidation
+	authMaxAge = 3600
 )
 
 // A configuration object that is loaded directly from the json config file.
 type conf struct {
-  // The host (without the port specification) that will be acting as the hub
-  Host string
+	// The host (without the port specification) that will be acting as the hub
+	Host string
 
-  // Google OAuth related settings
-  Oauth struct {
-    ClientId     string `json:"client-id"`
-    ClientSecret string `json:"client-secret"`
-    Domain       string `json:"domain"`
-  }
+	// Google OAuth related settings
+	Oauth struct {
+		ClientId     string `json:"client-id"`
+		ClientSecret string `json:"client-secret"`
+		Domain       string `json:"domain"`
+	}
 
-  // Whether or not to add a set of security headers to all HTTP responses:
-  //
-  //    Strict-Transport-Security -- if certs are present, enforce HTTPS
-  //    Cache-Control: private, no-cache -- prevent downstream caching
-  //    Pragma: no-cache -- prevent HTTP/1.0 downstream caching
-  //    X-Frame-Options: SAMEORIGIN -- prevent clickjacking
-  //
-  // Enable this if it your applications are OK with it and you want additional
-  // security.
-  AddSecurityHeaders bool `json:"use-strict-security-headers"`
+	// Whether or not to add a set of security headers to all HTTP responses:
+	//
+	//    Strict-Transport-Security -- if certs are present, enforce HTTPS
+	//    Cache-Control: private, no-cache -- prevent downstream caching
+	//    Pragma: no-cache -- prevent HTTP/1.0 downstream caching
+	//    X-Frame-Options: SAMEORIGIN -- prevent clickjacking
+	//
+	// Enable this if it your applications are OK with it and you want additional
+	// security.
+	AddSecurityHeaders bool `json:"use-strict-security-headers"`
 
-  // TLS certificiate files to enable https on the hub and endpoints. TLS is highly
-  // recommended and it is global. You cannot run some routes over HTTP and others over
-  // HTTPS. If you need to do this, you should use two instances of underpants (one on
-  // port 80 and the other on 443).
-  Certs []struct {
-    Crt string
-    Key string
-  }
+	// TLS certificiate files to enable https on the hub and endpoints. TLS is highly
+	// recommended and it is global. You cannot run some routes over HTTP and others over
+	// HTTPS. If you need to do this, you should use two instances of underpants (one on
+	// port 80 and the other on 443).
+	Certs []struct {
+		Crt string
+		Key string
+	}
 
-  // A mapping of group names to lists of user email addresses that are members
-  // of that group.  If this section is present, then the default behaviour for
-  // a route is to deny all users not in a group on its allowed-groups list.
-  Groups map[string][]string
+	// A mapping of group names to lists of user email addresses that are members
+	// of that group.  If this section is present, then the default behaviour for
+	// a route is to deny all users not in a group on its allowed-groups list.
+	Groups map[string][]string
 
-  // The mappings from hostname to backend server.
-  Routes []struct {
+	// The mappings from hostname to backend server.
+	Routes []struct {
 
-    // The hostname (excluding port) for the public facing hostname.
-    From string
+		// The hostname (excluding port) for the public facing hostname.
+		From string
 
-    // The base authority (i.e. http://backend.example.com:8080) for the backend. Backends
-    // can be referenced through either http:// or https:// base urls. If you provide a
-    // non-root (i.e. http://example.com/foo/bar/) URL, the path of the URL will be
-    // discarded.
-    To string
+		// The base authority (i.e. http://backend.example.com:8080) for the backend. Backends
+		// can be referenced through either http:// or https:// base urls. If you provide a
+		// non-root (i.e. http://example.com/foo/bar/) URL, the path of the URL will be
+		// discarded.
+		To string
 
-    // A list of groups which may access this route.  If groups are configured,
-    // users who are not a member of one of these groups will be denied access.
-    // A special group, `*`, may be specified which allows any authenticated
-    // user.
-    AllowedGroups []string `json:"allowed-groups"`
-  }
+		// A list of groups which may access this route.  If groups are configured,
+		// users who are not a member of one of these groups will be denied access.
+		// A special group, `*`, may be specified which allows any authenticated
+		// user.
+		AllowedGroups []string `json:"allowed-groups"`
+	}
 }
 
 // Used to dermine if the instance is running over HTTP or HTTPS, this indicates whether
 // any certificates were included in the configuration.
 func (c *conf) HasCerts() bool {
-  return len(c.Certs) > 0
+	return len(c.Certs) > 0
 }
 
 // Used to determine if the instance is configured for more granular group-based access
 // control lists.
 func (c *conf) HasGroups() bool {
-  return len(c.Groups) > 0
+	return len(c.Groups) > 0
 }
 
 // A convience method for getting the relevant scheme based on whether certificates were
 // included in the configuration.
 func (c *conf) Scheme() string {
-  if len(c.Certs) > 0 {
-    return "https"
-  }
-  return "http"
+	if len(c.Certs) > 0 {
+		return "https"
+	}
+	return "http"
 }
 
 // Represents the end-point for a backend. This is used at runtime to dispatch requests.
 type route struct {
-  host   string
-  scheme string
+	host   string
+	scheme string
 }
 
 // A user (as represented by Google OAuth)
 type user struct {
-  Email             string
-  Name              string
-  Picture           string
-  LastAuthenticated time.Time
+	Email             string
+	Name              string
+	Picture           string
+	LastAuthenticated time.Time
 }
 
 // Encode the full user object as a base64 string that is suitable for including in
 // the cookie.
 func (u *user) encode(key []byte) (string, error) {
-  var b bytes.Buffer
-  h := hmac.New(sha256.New, key)
-  w := base64.NewEncoder(base64.URLEncoding,
-    io.MultiWriter(h, &b))
-  if err := json.NewEncoder(w).Encode(u); err != nil {
-    return "", err
-  }
-  w.Close()
+	var b bytes.Buffer
+	h := hmac.New(sha256.New, key)
+	w := base64.NewEncoder(base64.URLEncoding,
+		io.MultiWriter(h, &b))
+	if err := json.NewEncoder(w).Encode(u); err != nil {
+		return "", err
+	}
+	w.Close()
 
-  return fmt.Sprintf("%s,%s",
-    base64.URLEncoding.EncodeToString(h.Sum(nil)),
-    b.String()), nil
+	return fmt.Sprintf("%s,%s",
+		base64.URLEncoding.EncodeToString(h.Sum(nil)),
+		b.String()), nil
 }
 
 // Validates an HMAC signed message using the specified key.
 func validMessage(key []byte, sig, msg string) bool {
-  s, err := base64.URLEncoding.DecodeString(sig)
-  if err != nil {
-    return false
-  }
+	s, err := base64.URLEncoding.DecodeString(sig)
+	if err != nil {
+		return false
+	}
 
-  h := hmac.New(sha256.New, key)
-  h.Write([]byte(msg))
-  v := h.Sum(nil)
-  if len(v) != len(s) {
-    return false
-  }
+	h := hmac.New(sha256.New, key)
+	h.Write([]byte(msg))
+	v := h.Sum(nil)
+	if len(v) != len(s) {
+		return false
+	}
 
-  if subtle.ConstantTimeCompare(s, v) != 1 {
-    return false;
-  }
+	if subtle.ConstantTimeCompare(s, v) != 1 {
+		return false
+	}
 
-  return true
+	return true
 }
 
 // Using a key (for validation) and a base64 encoded string, re-construct the encoded
 // user that it represents.
 func decodeUser(c string, key []byte) (*user, error) {
-  s := strings.SplitN(c, ",", 2)
+	s := strings.SplitN(c, ",", 2)
 
-  if len(s) != 2 || !validMessage(key, s[0], s[1]) {
-    return nil, fmt.Errorf("Invalid user cookie: %s", c)
-  }
+	if len(s) != 2 || !validMessage(key, s[0], s[1]) {
+		return nil, fmt.Errorf("Invalid user cookie: %s", c)
+	}
 
-  var u user
-  r := base64.NewDecoder(base64.URLEncoding, bytes.NewBufferString(s[1]))
-  if err := json.NewDecoder(r).Decode(&u); err != nil {
-    return nil, err
-  }
+	var u user
+	r := base64.NewDecoder(base64.URLEncoding, bytes.NewBufferString(s[1]))
+	if err := json.NewDecoder(r).Decode(&u); err != nil {
+		return nil, err
+	}
 
-  now := time.Now()
-  age := now.Sub(u.LastAuthenticated)
-  if age.Seconds() >= authMaxAge {
-    return nil, fmt.Errorf("Cookie too old for: %s", u.Email)
-  }
+	now := time.Now()
+	age := now.Sub(u.LastAuthenticated)
+	if age.Seconds() >= authMaxAge {
+		return nil, fmt.Errorf("Cookie too old for: %s", u.Email)
+	}
 
-  return &u, nil
+	return &u, nil
 }
 
 // Represents a route to a backend. This is fully immutable after construction and will
 // be shared among http serving go routines.
 type disp struct {
-  // A copy of the original configuration
-  config *conf
+	// A copy of the original configuration
+	config *conf
 
-  // The host of the hub consistent with url.URL.Host, which is essentially the entire
-  // authority of the URL. Examples: hub.monetology.com or hub.monetology.com:4080
-  host string
+	// The host of the hub consistent with url.URL.Host, which is essentially the entire
+	// authority of the URL. Examples: hub.monetology.com or hub.monetology.com:4080
+	host string
 
-  // The route to the relevant backend
-  route *route
+	// The route to the relevant backend
+	route *route
 
-  // The signing key to use for authenticity
-  key []byte
+	// The signing key to use for authenticity
+	key []byte
 
-  // The OAuth configuration object needed for authentication.
-  oauth *oauth.Config
+	// The OAuth configuration object needed for authentication.
+	oauth *oauth2.Config
 
-  // The groups which may access this backend.
-  groups []string
+	// The groups which may access this backend.
+	groups []string
 }
 
 // Construct a URL to the oauth provider that with carry the provided URL as state
 // through the authentication process.
 func (d *disp) AuthCodeUrl(u *url.URL) string {
-  return fmt.Sprintf("%s&%s",
-    d.oauth.AuthCodeURL(u.String()),
-    url.Values{"hd": {d.config.Oauth.Domain}}.Encode())
+	return fmt.Sprintf("%s&%s",
+		d.oauth.AuthCodeURL(u.String()),
+		url.Values{"hd": {d.config.Oauth.Domain}}.Encode())
 }
 
 // Copy the HTTP headers from one collection to another.
 func copyHeaders(dst, src http.Header) {
-  for key, vals := range src {
-    for _, val := range vals {
-      dst.Add(key, val)
-    }
-  }
+	for key, vals := range src {
+		for _, val := range vals {
+			dst.Add(key, val)
+		}
+	}
 }
 
 // Extract a user object from the http request.  The key is used for HMAC
 // signature verification.
 func userFrom(r *http.Request, key []byte) *user {
-  c, err := r.Cookie(userCookieKey)
-  if err != nil || c.Value == "" {
-    return nil
-  }
+	c, err := r.Cookie(userCookieKey)
+	if err != nil || c.Value == "" {
+		return nil
+	}
 
-  log.Printf("Cookie: %s...", c.Value[:32])
-  v, err := url.QueryUnescape(c.Value)
-  if err != nil {
-    return nil
-  }
+	log.Printf("Cookie: %s...", c.Value[:32])
+	v, err := url.QueryUnescape(c.Value)
+	if err != nil {
+		return nil
+	}
 
-  u, err := decodeUser(v, key)
-  if err != nil {
-    log.Printf("  Rejected: %s...", c.Value[:32])
-    return nil
-  }
+	u, err := decodeUser(v, key)
+	if err != nil {
+		log.Printf("  Rejected: %s...", c.Value[:32])
+		return nil
+	}
 
-  return u
+	return u
 }
 
 // Find the rewritten URL for a request that is being proxied along a route to a
 // backend defined by the scheme and host.
 func urlFor(scheme, host string, r *http.Request) *url.URL {
-  u := *r.URL
-  u.Host = host
-  u.Scheme = scheme
-  return &u
+	u := *r.URL
+	u.Host = host
+	u.Scheme = scheme
+	return &u
 }
 
 func userMemberOf(c *conf, u *user, groups []string) bool {
-  for _, group := range groups {
-    if group == "*" {
-      return true
-    }
+	for _, group := range groups {
+		if group == "*" {
+			return true
+		}
 
-    for _, allowedUser := range c.Groups[group] {
-      if u.Email == allowedUser {
-        return true
-      }
-    }
-  }
+		for _, allowedUser := range c.Groups[group] {
+			if u.Email == allowedUser {
+				return true
+			}
+		}
+	}
 
-  return false
+	return false
 }
 
 // Serve the response by proxying it to the backend represented by the disp object.
 func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
-  u := userFrom(r, d.key)
-  if u == nil {
-    http.Redirect(w, r,
-      d.AuthCodeUrl(urlFor(d.config.Scheme(), d.host, r)),
-      http.StatusFound)
-    return
-  }
+	u := userFrom(r, d.key)
+	if u == nil {
+		http.Redirect(w, r,
+			d.AuthCodeUrl(urlFor(d.config.Scheme(), d.host, r)),
+			http.StatusFound)
+		return
+	}
 
-  if d.config.HasGroups() {
-    if !userMemberOf(d.config, u, d.groups) {
-      log.Printf("Denied %s access to %s", u.Email, d.host)
-      http.Error(w, "Forbidden: you are not a member of a group authorized to view this site.", http.StatusForbidden)
-      return
-    }
-  }
+	if d.config.HasGroups() {
+		if !userMemberOf(d.config, u, d.groups) {
+			log.Printf("Denied %s access to %s", u.Email, d.host)
+			http.Error(w, "Forbidden: you are not a member of a group authorized to view this site.", http.StatusForbidden)
+			return
+		}
+	}
 
-  br, err := http.NewRequest(r.Method, urlFor(d.route.scheme, d.route.host, r).String(), r.Body)
-  if err != nil {
-    panic(err)
-  }
+	br, err := http.NewRequest(r.Method, urlFor(d.route.scheme, d.route.host, r).String(), r.Body)
+	if err != nil {
+		panic(err)
+	}
 
-  // Without passing on the original Content-Length, http.Client will use
-  // Transfer-Encoding: chunked which some HTTP servers fall down on.
-  br.ContentLength = r.ContentLength
+	// Without passing on the original Content-Length, http.Client will use
+	// Transfer-Encoding: chunked which some HTTP servers fall down on.
+	br.ContentLength = r.ContentLength
 
-  copyHeaders(br.Header, r.Header)
+	copyHeaders(br.Header, r.Header)
 
-  // User information is passed to backends as headers.
-  br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
-  br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
+	// User information is passed to backends as headers.
+	br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
+	br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
 
-  bp, err := http.DefaultTransport.RoundTrip(br)
-  if err != nil {
-    panic(err)
-  }
-  defer bp.Body.Close()
+	bp, err := http.DefaultTransport.RoundTrip(br)
+	if err != nil {
+		panic(err)
+	}
+	defer bp.Body.Close()
 
-  copyHeaders(w.Header(), bp.Header)
-  w.WriteHeader(bp.StatusCode)
-  if _, err := io.Copy(w, bp.Body); err != nil {
-    panic(err)
-  }
+	copyHeaders(w.Header(), bp.Header)
+	w.WriteHeader(bp.StatusCode)
+	if _, err := io.Copy(w, bp.Body); err != nil {
+		panic(err)
+	}
 }
 
 // Serve the request as an authentication request.
 func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
-  c, p := r.FormValue("c"), r.FormValue("p")
-  if c == "" || !strings.HasPrefix(p, "/") {
-    http.Error(w,
-      http.StatusText(http.StatusBadRequest),
-      http.StatusBadRequest)
-    return
-  }
+	c, p := r.FormValue("c"), r.FormValue("p")
+	if c == "" || !strings.HasPrefix(p, "/") {
+		http.Error(w,
+			http.StatusText(http.StatusBadRequest),
+			http.StatusBadRequest)
+		return
+	}
 
-  // verify the cookie
-  if _, err := decodeUser(c, d.key); err != nil {
-    // do not redirect out of here because this indicates a big
-    // problem and we're likely to get into a redir loop.
-    http.Error(w,
-      http.StatusText(http.StatusForbidden),
-      http.StatusForbidden)
-    return
-  }
+	// verify the cookie
+	if _, err := decodeUser(c, d.key); err != nil {
+		// do not redirect out of here because this indicates a big
+		// problem and we're likely to get into a redir loop.
+		http.Error(w,
+			http.StatusText(http.StatusForbidden),
+			http.StatusForbidden)
+		return
+	}
 
-  http.SetCookie(w, &http.Cookie{
-    Name:     userCookieKey,
-    Value:    url.QueryEscape(c),
-    Path:     "/",
-    MaxAge:   authMaxAge,
-    HttpOnly: true,
-    Secure:   d.config.HasCerts(),
-  })
+	http.SetCookie(w, &http.Cookie{
+		Name:     userCookieKey,
+		Value:    url.QueryEscape(c),
+		Path:     "/",
+		MaxAge:   authMaxAge,
+		HttpOnly: true,
+		Secure:   d.config.HasCerts(),
+	})
 
-  // TODO(knorton): validate the url string because it could totally
-  // be used to fuck with the http message.
-  http.Redirect(w, r, p, http.StatusFound)
+	// TODO(knorton): validate the url string because it could totally
+	// be used to fuck with the http message.
+	http.Redirect(w, r, p, http.StatusFound)
 }
 
 // Serve the request for a particular route.
 func (d *disp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-  p := r.URL.Path
-  if strings.HasPrefix(p, authPathPrefix) {
-    serveHttpAuth(d, w, r)
-  } else {
-    serveHttpProxy(d, w, r)
-  }
+	p := r.URL.Path
+	if strings.HasPrefix(p, authPathPrefix) {
+		serveHttpAuth(d, w, r)
+	} else {
+		serveHttpProxy(d, w, r)
+	}
 }
 
 // Construct an OAuth configuration object.
-func oauthConfig(c *conf, port int) *oauth.Config {
-  return &oauth.Config{
-    ClientId:     c.Oauth.ClientId,
-    ClientSecret: c.Oauth.ClientSecret,
-    AuthURL:      "https://accounts.google.com/o/oauth2/auth",
-    TokenURL:     "https://accounts.google.com/o/oauth2/token",
-    Scope:        "https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
-    RedirectURL:  fmt.Sprintf("%s://%s%s", c.Scheme(), hostOf(c.Host, port), authPathPrefix),
-  }
+func oauthConfig(c *conf, port int) *oauth2.Config {
+	return &oauth2.Config{
+		ClientID:     c.Oauth.ClientId,
+		ClientSecret: c.Oauth.ClientSecret,
+		Endpoint:     google.Endpoint,
+		Scopes: []string{
+			"https://www.googleapis.com/auth/userinfo.profile",
+			"https://www.googleapis.com/auth/userinfo.email",
+		},
+		RedirectURL: fmt.Sprintf("%s://%s%s", c.Scheme(), hostOf(c.Host, port), authPathPrefix),
+	}
 }
 
 // Load the configuration objects from the given filename.
 func config(filename string) (*conf, error) {
-  f, err := os.Open(filename)
-  if err != nil {
-    return nil, err
-  }
-  defer f.Close()
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
 
-  var c conf
-  if err := json.NewDecoder(f).Decode(&c); err != nil {
-    return nil, err
-  }
+	var c conf
+	if err := json.NewDecoder(f).Decode(&c); err != nil {
+		return nil, err
+	}
 
-  return &c, nil
+	return &c, nil
 }
 
 // Generate a new random key for HMAC signing. Server keys are completely emphemeral
@@ -406,320 +411,319 @@ func config(filename string) (*conf, error) {
 // This means all cookies are invalidated just by restarting the server. This is
 // generally desirable since it is "easy" for clients to re-authenticate with OAuth.
 func newKey() ([]byte, error) {
-  var b bytes.Buffer
-  if _, err := io.CopyN(&b, rand.Reader, 64); err != nil {
-    return nil, err
-  }
+	var b bytes.Buffer
+	if _, err := io.CopyN(&b, rand.Reader, 64); err != nil {
+		return nil, err
+	}
 
-  return b.Bytes(), nil
+	return b.Bytes(), nil
 }
 
 // Construct a proper hostname (name:port) but taking into account standard ports
 // where the port specification should be omitted.
 func hostOf(name string, port int) string {
-  switch port {
-  case 80, 443:
-    return name
-  }
-  return fmt.Sprintf("%s:%d", name, port)
+	switch port {
+	case 80, 443:
+		return name
+	}
+	return fmt.Sprintf("%s:%d", name, port)
 }
 
 func addSecurityHeaders(c *conf, next http.Handler) http.Handler {
-  if c.AddSecurityHeaders {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-      if c.HasCerts() {
-        w.Header().Add("Strict-Transport-Security", "max-age=16070400; includeSubDomains")
-      }
+	if c.AddSecurityHeaders {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if c.HasCerts() {
+				w.Header().Add("Strict-Transport-Security", "max-age=16070400; includeSubDomains")
+			}
 
-      w.Header().Add("X-Frame-Options", "SAMEORIGIN")
-      w.Header().Add("Cache-Control", "private, no-cache")
-      w.Header().Add("Pragma", "no-cache")
-      next.ServeHTTP(w, r)
-    })
-  } else {
-    return next
-  }
+			w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+			w.Header().Add("Cache-Control", "private, no-cache")
+			w.Header().Add("Pragma", "no-cache")
+			next.ServeHTTP(w, r)
+		})
+	} else {
+		return next
+	}
 }
 
 func addSecurityHeadersFunc(c *conf, next func(http.ResponseWriter, *http.Request)) http.Handler {
-  return addSecurityHeaders(c, http.HandlerFunc(next))
+	return addSecurityHeaders(c, http.HandlerFunc(next))
 }
 
 // Setup all handlers in a ServeMux.
 func setup(c *conf, port int) (*http.ServeMux, error) {
-  m := http.NewServeMux()
+	m := http.NewServeMux()
 
-  // Construct the HMAC signing key
-  key, err := newKey()
-  if err != nil {
-    return nil, err
-  }
+	// Construct the HMAC signing key
+	key, err := newKey()
+	if err != nil {
+		return nil, err
+	}
 
-  // setup routes
-  oc := oauthConfig(c, port)
-  for _, r := range c.Routes {
-    host := hostOf(r.From, port)
-    uri, err := url.Parse(r.To)
-    if err != nil {
-      return nil, err
-    }
+	// setup routes
+	oc := oauthConfig(c, port)
+	for _, r := range c.Routes {
+		host := hostOf(r.From, port)
+		uri, err := url.Parse(r.To)
+		if err != nil {
+			return nil, err
+		}
 
-    m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(c, &disp{
-      config: c,
-      route:  &route{host: uri.Host, scheme: uri.Scheme},
-      host:   host,
-      key:    key,
-      oauth:  oc,
-      groups: r.AllowedGroups,
-    }))
-  }
+		m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(c, &disp{
+			config: c,
+			route:  &route{host: uri.Host, scheme: uri.Scheme},
+			host:   host,
+			key:    key,
+			oauth:  oc,
+			groups: r.AllowedGroups,
+		}))
+	}
 
-  // load the template for the one piece of static content embedded in
-  // the server
-  t := template.Must(template.New("index.html").Parse(rootTmpl))
+	// load the template for the one piece of static content embedded in
+	// the server
+	t := template.Must(template.New("index.html").Parse(rootTmpl))
 
-  // setup admin
-  m.Handle("/", addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
-    switch r.URL.Path {
-    case "/":
-      u := userFrom(r, key)
-      w.Header().Set("Content-Type", "text/html;charset=utf-8")
-      if debugTmpl {
-        t, err := template.ParseFiles("index.html")
-        if err != nil {
-          panic(err)
-        }
-        t.Execute(w, u)
-        return
-      }
-      t.Execute(w, u)
-    default:
-      http.NotFound(w, r)
-    }
-  }))
+	// setup admin
+	m.Handle("/", addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			u := userFrom(r, key)
+			w.Header().Set("Content-Type", "text/html;charset=utf-8")
+			if debugTmpl {
+				t, err := template.ParseFiles("index.html")
+				if err != nil {
+					panic(err)
+				}
+				t.Execute(w, u)
+				return
+			}
+			t.Execute(w, u)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
 
-  m.Handle(authPathPrefix, addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
-    code := r.FormValue("code")
-    stat := r.FormValue("state")
-    if code == "" || stat == "" {
-      http.Error(w,
-        http.StatusText(http.StatusForbidden),
-        http.StatusForbidden)
-      return
-    }
+	m.Handle(authPathPrefix, addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
+		code := r.FormValue("code")
+		stat := r.FormValue("state")
+		if code == "" || stat == "" {
+			http.Error(w,
+				http.StatusText(http.StatusForbidden),
+				http.StatusForbidden)
+			return
+		}
 
-    // If stat isn't a valid URL, this is totally bogus.
-    back, err := url.Parse(stat)
-    if err != nil {
-      http.Error(w,
-        http.StatusText(http.StatusForbidden),
-        http.StatusForbidden)
-      return
-    }
+		// If stat isn't a valid URL, this is totally bogus.
+		back, err := url.Parse(stat)
+		if err != nil {
+			http.Error(w,
+				http.StatusText(http.StatusForbidden),
+				http.StatusForbidden)
+			return
+		}
 
-    t := &oauth.Transport{Config: oc}
-    _, err = t.Exchange(code)
-    if err != nil {
-      http.Error(w, "Forbidden", http.StatusForbidden)
-      return
-    }
+		tok, err := oc.Exchange(context.Background(), code)
+		if err != nil {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 
-    res, err := t.Client().Get("https://www.googleapis.com/oauth2/v1/userinfo?alt=json")
-    if err != nil {
-      panic(err)
-      return
-    }
-    defer res.Body.Close()
+		res, err := oc.Client(context.Background(), tok).Get("https://www.googleapis.com/oauth2/v1/userinfo?alt=json")
+		if err != nil {
+			panic(err)
+			return
+		}
+		defer res.Body.Close()
 
-    u := user{ LastAuthenticated: time.Now() }
-    if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
-      panic(err)
-    }
+		u := user{LastAuthenticated: time.Now()}
+		if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
+			panic(err)
+		}
 
-    // this only happens when someone edits the auth url
-    if !strings.HasSuffix(u.Email, "@" + c.Oauth.Domain) {
-      http.Error(w,
-        http.StatusText(http.StatusForbidden),
-        http.StatusForbidden)
-      return
-    }
+		// this only happens when someone edits the auth url
+		if !strings.HasSuffix(u.Email, "@"+c.Oauth.Domain) {
+			http.Error(w,
+				http.StatusText(http.StatusForbidden),
+				http.StatusForbidden)
+			return
+		}
 
-    v, err := u.encode(key)
-    if err != nil {
-      panic(err)
-    }
+		v, err := u.encode(key)
+		if err != nil {
+			panic(err)
+		}
 
-    http.SetCookie(w, &http.Cookie{
-      Name:     userCookieKey,
-      Value:    url.QueryEscape(v),
-      Path:     "/",
-      MaxAge:   authMaxAge,
-      HttpOnly: true,
-      Secure:   c.HasCerts(),
-    })
+		http.SetCookie(w, &http.Cookie{
+			Name:     userCookieKey,
+			Value:    url.QueryEscape(v),
+			Path:     "/",
+			MaxAge:   authMaxAge,
+			HttpOnly: true,
+			Secure:   c.HasCerts(),
+		})
 
-    p := back.Path
-    if back.RawQuery != "" {
-      p += fmt.Sprintf("?%s", back.RawQuery)
-    }
+		p := back.Path
+		if back.RawQuery != "" {
+			p += fmt.Sprintf("?%s", back.RawQuery)
+		}
 
-    http.Redirect(w, r,
-      fmt.Sprintf("%s://%s%s?%s", c.Scheme(), back.Host, authPathPrefix,
-        url.Values{
-          "p": {p},
-          "c": {v},
-        }.Encode()),
-      http.StatusFound)
-  }))
+		http.Redirect(w, r,
+			fmt.Sprintf("%s://%s%s?%s", c.Scheme(), back.Host, authPathPrefix,
+				url.Values{
+					"p": {p},
+					"c": {v},
+				}.Encode()),
+			http.StatusFound)
+	}))
 
-  m.Handle(
-    fmt.Sprintf("%slogout", authPathPrefix),
-    addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
-      if r.Method != "POST" {
-        http.Error(w,
-          http.StatusText(http.StatusMethodNotAllowed),
-          http.StatusMethodNotAllowed)
-        return
-      }
+	m.Handle(
+		fmt.Sprintf("%slogout", authPathPrefix),
+		addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "POST" {
+				http.Error(w,
+					http.StatusText(http.StatusMethodNotAllowed),
+					http.StatusMethodNotAllowed)
+				return
+			}
 
-      http.SetCookie(w, &http.Cookie{
-        Name:   userCookieKey,
-        Value:  "",
-        Path:   "/",
-        MaxAge: 0,
-      })
+			http.SetCookie(w, &http.Cookie{
+				Name:   userCookieKey,
+				Value:  "",
+				Path:   "/",
+				MaxAge: 0,
+			})
 
-      // TODO(knorton): Convert this to simple html page
-      w.Header().Set("Content-Type", "text/plain")
-      fmt.Fprintln(w, "ok.")
-    }))
+			// TODO(knorton): Convert this to simple html page
+			w.Header().Set("Content-Type", "text/plain")
+			fmt.Fprintln(w, "ok.")
+		}))
 
-  return m, nil
+	return m, nil
 }
 
 // Determine the addr specification that will be passed to a net.Listener.
 func addrFrom(port int) string {
-  switch port {
-  case 80:
-    return ":http"
-  case 443:
-    return ":https"
-  }
+	switch port {
+	case 80:
+		return ":http"
+	case 443:
+		return ":https"
+	}
 
-  return fmt.Sprintf(":%d", port)
+	return fmt.Sprintf(":%d", port)
 }
 
 // Load the TLS certificate from the speciified files. The key file can be an encryped
 // PEM so long as it carries the appropriate headers (Proc-Type and Dek-Info) and the
 // password will be requested interactively.
 func LoadCertificate(crtFile, keyFile string) (tls.Certificate, error) {
-  crtBytes, err := ioutil.ReadFile(crtFile)
-  if err != nil {
-    return tls.Certificate{}, err
-  }
+	crtBytes, err := ioutil.ReadFile(crtFile)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
 
-  keyBytes, err := ioutil.ReadFile(keyFile)
-  if err != nil {
-    return tls.Certificate{}, err
-  }
+	keyBytes, err := ioutil.ReadFile(keyFile)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
 
-  keyDer, _ := pem.Decode(keyBytes)
-  if keyDer == nil {
-    return tls.Certificate{}, fmt.Errorf("%s cannot be decoded.", keyFile)
-  }
+	keyDer, _ := pem.Decode(keyBytes)
+	if keyDer == nil {
+		return tls.Certificate{}, fmt.Errorf("%s cannot be decoded.", keyFile)
+	}
 
-  // http://www.ietf.org/rfc/rfc1421.txt
-  if !strings.HasPrefix(keyDer.Headers["Proc-Type"], "4,ENCRYPTED") {
-    return tls.X509KeyPair(crtBytes, keyBytes)
-  }
+	// http://www.ietf.org/rfc/rfc1421.txt
+	if !strings.HasPrefix(keyDer.Headers["Proc-Type"], "4,ENCRYPTED") {
+		return tls.X509KeyPair(crtBytes, keyBytes)
+	}
 
-  fmt.Printf("%s\nPassword: ", keyFile)
-  pwd, err := terminal.ReadPassword(int(os.Stdin.Fd()))
-  fmt.Println()
-  if err != nil {
-    return tls.Certificate{}, err
-  }
+	fmt.Printf("%s\nPassword: ", keyFile)
+	pwd, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println()
+	if err != nil {
+		return tls.Certificate{}, err
+	}
 
-  keyDec, err := x509.DecryptPEMBlock(keyDer, pwd)
-  if err != nil {
-    return tls.Certificate{}, err
-  }
+	keyDec, err := x509.DecryptPEMBlock(keyDer, pwd)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
 
-  return tls.X509KeyPair(crtBytes, pem.EncodeToMemory(&pem.Block{
-    Type:    "RSA PRIVATE KEY",
-    Headers: map[string]string{},
-    Bytes:   keyDec,
-  }))
+	return tls.X509KeyPair(crtBytes, pem.EncodeToMemory(&pem.Block{
+		Type:    "RSA PRIVATE KEY",
+		Headers: map[string]string{},
+		Bytes:   keyDec,
+	}))
 }
 
 // Bind the listening port and start serving traffic.
 func ListenAndServe(addr string, cfg *conf, m *http.ServeMux) error {
-  if cfg.HasCerts() {
-    var certs []tls.Certificate
-    for _, item := range cfg.Certs {
-      crt, err := LoadCertificate(item.Crt, item.Key)
-      if err != nil {
-        return err
-      }
+	if cfg.HasCerts() {
+		var certs []tls.Certificate
+		for _, item := range cfg.Certs {
+			crt, err := LoadCertificate(item.Crt, item.Key)
+			if err != nil {
+				return err
+			}
 
-      certs = append(certs, crt)
-    }
+			certs = append(certs, crt)
+		}
 
-    s := &http.Server{
-      Addr:    addr,
-      Handler: m,
-      TLSConfig: &tls.Config{
-        NextProtos:   []string{"http/1.1"},
-        Certificates: certs,
-		MinVersion: tls.VersionTLS10,
-		CipherSuites: []uint16 {
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-		},
-		PreferServerCipherSuites: true,
-      },
-    }
+		s := &http.Server{
+			Addr:    addr,
+			Handler: m,
+			TLSConfig: &tls.Config{
+				NextProtos:   []string{"http/1.1"},
+				Certificates: certs,
+				MinVersion:   tls.VersionTLS10,
+				CipherSuites: []uint16{
+					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+					tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+				},
+				PreferServerCipherSuites: true,
+			},
+		}
 
-    s.TLSConfig.BuildNameToCertificate()
+		s.TLSConfig.BuildNameToCertificate()
 
-    conn, err := net.Listen("tcp", addr)
-    if err != nil {
-      return err
-    }
+		conn, err := net.Listen("tcp", addr)
+		if err != nil {
+			return err
+		}
 
-    return s.Serve(tls.NewListener(conn, s.TLSConfig))
-  }
+		return s.Serve(tls.NewListener(conn, s.TLSConfig))
+	}
 
-  return http.ListenAndServe(addr, m)
+	return http.ListenAndServe(addr, m)
 }
 
 func main() {
-  flagPort := flag.Int("port", 0, "")
-  flagConf := flag.String("conf", "underpants.json", "")
+	flagPort := flag.Int("port", 0, "")
+	flagConf := flag.String("conf", "underpants.json", "")
 
-  flag.Parse()
+	flag.Parse()
 
-  c, err := config(*flagConf)
-  if err != nil {
-    panic(err)
-  }
+	c, err := config(*flagConf)
+	if err != nil {
+		panic(err)
+	}
 
-  if *flagPort == 0 {
-    if c.HasCerts() {
-      *flagPort = 443
-    } else {
-      *flagPort = 80
-    }
-  }
-  m, err := setup(c, *flagPort)
-  if err != nil {
-    panic(err)
-  }
+	if *flagPort == 0 {
+		if c.HasCerts() {
+			*flagPort = 443
+		} else {
+			*flagPort = 80
+		}
+	}
+	m, err := setup(c, *flagPort)
+	if err != nil {
+		panic(err)
+	}
 
-  if err := ListenAndServe(addrFrom(*flagPort), c, m); err != nil {
-    panic(err)
-  }
+	if err := ListenAndServe(addrFrom(*flagPort), c, m); err != nil {
+		panic(err)
+	}
 }
 
 const debugTmpl = false
