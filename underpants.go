@@ -267,6 +267,25 @@ func urlFor(scheme, host string, r *http.Request) *url.URL {
   return &u
 }
 
+// Rewrite `Location` headers to point at the external hostname of a service if
+// the downstream uses its internal name.
+func rewriteRedirects(headers *http.Header, external string, internal string) {
+  location := headers.Get("Location")
+  if location == "" {
+    return
+  }
+
+  location_url, err := url.Parse(location)
+  if err != nil {
+    return
+  }
+
+  if location_url.Host == internal {
+    location_url.Host = external
+    headers.Set("Location", location_url.String())
+  }
+}
+
 func userMemberOf(c *conf, u *user, groups []string) bool {
   for _, group := range groups {
     if group == "*" {
@@ -312,16 +331,21 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 
   copyHeaders(br.Header, r.Header)
 
+  // Proxy the Host header so the downstream knows how to generate useful URLs
+  br.Host = r.Host
+
   // User information is passed to backends as headers.
-  br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
-  br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
+  br.Header.Set("Underpants-Email", url.QueryEscape(u.Email))
+  br.Header.Set("Underpants-Name", url.QueryEscape(u.Name))
 
   bp, err := http.DefaultTransport.RoundTrip(br)
   if err != nil {
-    panic(err)
+    http.Error(w, "failed to get valid response from internal service", 503)
+    return
   }
   defer bp.Body.Close()
 
+  rewriteRedirects(&bp.Header, d.host, d.route.host)
   copyHeaders(w.Header(), bp.Header)
   w.WriteHeader(bp.StatusCode)
   if _, err := io.Copy(w, bp.Body); err != nil {
