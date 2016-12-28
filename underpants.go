@@ -123,10 +123,9 @@ func (c *conf) HasGroups() bool {
 	return len(c.Groups) > 0
 }
 
-// A convience method for getting the relevant scheme based on whether certificates were
-// included in the configuration.
+// A convience method for getting the relevant scheme
 func (c *conf) Scheme() string {
-	if len(c.Certs) > 0 {
+	if c.UseHTTPS() {
 		return "https"
 	}
 	return "http"
