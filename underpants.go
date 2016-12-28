@@ -76,6 +76,9 @@ type conf struct {
 		Key string
 	}
 
+	// Use HTTPS even if we don't have certs.
+	BehindTLSTerminator bool `json:"behind-tls-terminator"`
+
 	// A mapping of group names to lists of user email addresses that are members
 	// of that group.  If this section is present, then the default behaviour for
 	// a route is to deny all users not in a group on its allowed-groups list.
@@ -86,6 +89,7 @@ type conf struct {
 
 		// Use https in the redirects for From
 		FromHTTPS *bool
+
 		// The hostname (excluding port) for the public facing hostname.
 		From string
 
@@ -107,6 +111,10 @@ type conf struct {
 // any certificates were included in the configuration.
 func (c *conf) HasCerts() bool {
 	return len(c.Certs) > 0
+}
+
+func (c *conf) UseHTTPS() bool {
+	return c.HasCerts() || c.BehindTLSTerminator
 }
 
 // Used to determine if the instance is configured for more granular group-based access
@@ -362,7 +370,7 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   authMaxAge,
 		HttpOnly: true,
-		Secure:   d.config.HasCerts(),
+		Secure:   d.config.UseHTTPS(),
 	})
 
 	// TODO(knorton): validate the url string because it could totally
@@ -436,7 +444,7 @@ func hostOf(name string, port int) string {
 func addSecurityHeaders(c *conf, next http.Handler) http.Handler {
 	if c.AddSecurityHeaders {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if c.HasCerts() {
+			if c.UseHTTPS() {
 				w.Header().Add("Strict-Transport-Security", "max-age=16070400; includeSubDomains")
 			}
 
@@ -569,7 +577,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 			Path:     "/",
 			MaxAge:   authMaxAge,
 			HttpOnly: true,
-			Secure:   c.HasCerts(),
+			Secure:   c.UseHTTPS(),
 		})
 
 		p := back.Path
