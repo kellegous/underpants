@@ -84,6 +84,8 @@ type conf struct {
 	// The mappings from hostname to backend server.
 	Routes []struct {
 
+		// Use https in the redirects for From
+		FromHTTPS *bool
 		// The hostname (excluding port) for the public facing hostname.
 		From string
 
@@ -219,6 +221,8 @@ type disp struct {
 
 	// The groups which may access this backend.
 	groups []string
+
+	scheme string
 }
 
 // Construct a URL to the oauth provider that with carry the provided URL as state
@@ -291,7 +295,7 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r, d.key)
 	if u == nil {
 		http.Redirect(w, r,
-			d.AuthCodeUrl(urlFor(d.config.Scheme(), d.host, r)),
+			d.AuthCodeUrl(urlFor(d.scheme, d.host, r)),
 			http.StatusFound)
 		return
 	}
@@ -469,6 +473,11 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 			return nil, err
 		}
 
+		scheme := c.Scheme()
+		if r.FromHTTPS != nil && *r.FromHTTPS {
+			scheme = "https"
+		}
+
 		m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(c, &disp{
 			config: c,
 			route:  &route{host: uri.Host, scheme: uri.Scheme},
@@ -476,6 +485,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 			key:    key,
 			oauth:  oc,
 			groups: r.AllowedGroups,
+			scheme: scheme,
 		}))
 	}
 
