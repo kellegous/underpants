@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	jwt "github.com/dgrijalva/jwt-go"
 	"golang.org/x/crypto/ssh/terminal"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
@@ -338,13 +339,15 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 
 	//Set the JWT Cookie if its safe to do so.
 	if d.config.UseHTTPS() {
-		http.SetCookie(w, &http.Cookie{
-			Name:   "jwt_cookie",
-			Value:  generateJWT(),
-			Path:   "/",
-			Secure: true,
-			Domain: d.config.cookieDomain(),
-		})
+		if token, err := generateJWT(); err != nil {
+			http.SetCookie(w, &http.Cookie{
+				Name:   "jwt_cookie",
+				Value:  token,
+				Path:   "/",
+				Secure: true,
+				Domain: d.config.cookieDomain(),
+			})
+		}
 	}
 
 	copyHeaders(w.Header(), bp.Header)
@@ -397,13 +400,19 @@ func (c *conf) cookieDomain() string {
 	}
 
 	var result = strings.Join(parts, ".")
-	log.Printf("JWT Cookie Domain: %s", result)
 	return result
 }
 
 // Generate the JWTCookie Value
-func generateJWT() string {
-	return "fake cookie"
+func generateJWT() (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"foo": "bar",
+		"nbf": time.Date(2015, 10, 10, 12, 0, 0, 0, time.UTC).Unix(),
+	})
+
+	// Sign and get the complete encoded token as a string using the secret
+	tokenString, err := token.SignedString("secret")
+	return tokenString, err
 }
 
 // Serve the request for a particular route.
