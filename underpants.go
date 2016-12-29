@@ -393,7 +393,7 @@ func (c *conf) cookieDomain() string {
 	var parts = strings.Split(c.Host, ".")
 	var partLen = len(parts)
 	if partLen > 2 {
-		parts = parts[partLen-1 : partLen]
+		parts = parts[partLen-2 : partLen-1]
 	}
 
 	var result = strings.Join(parts, ".")
