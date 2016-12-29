@@ -336,9 +336,6 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 	}
 	defer bp.Body.Close()
 
-	copyHeaders(w.Header(), bp.Header)
-	w.WriteHeader(bp.StatusCode)
-
 	//Set the JWT Cookie if its safe to do so.
 	if d.config.UseHTTPS() {
 		http.SetCookie(w, &http.Cookie{
@@ -349,6 +346,9 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 			Domain: d.config.cookieDomain(),
 		})
 	}
+
+	copyHeaders(w.Header(), bp.Header)
+	w.WriteHeader(bp.StatusCode)
 
 	if _, err := io.Copy(w, bp.Body); err != nil {
 		panic(err)
@@ -393,7 +393,7 @@ func (c *conf) cookieDomain() string {
 	var parts = strings.Split(c.Host, ".")
 	var partLen = len(parts)
 	if partLen > 2 {
-		parts = parts[partLen-2 : partLen-1]
+		parts = parts[partLen-2 : partLen]
 	}
 
 	var result = strings.Join(parts, ".")
