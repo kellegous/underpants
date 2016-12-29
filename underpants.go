@@ -339,7 +339,8 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 
 	//Set the JWT Cookie if its safe to do so.
 	if d.config.UseHTTPS() {
-		if token, err := generateJWT(); err != nil {
+		token, err := generateJWT(d.config.Host, u.Email)
+		if err != nil {
 			http.SetCookie(w, &http.Cookie{
 				Name:   "jwt_cookie",
 				Value:  token,
@@ -347,6 +348,8 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 				Secure: true,
 				Domain: d.config.cookieDomain(),
 			})
+		} else {
+			panic(err)
 		}
 	}
 
@@ -404,14 +407,16 @@ func (c *conf) cookieDomain() string {
 }
 
 // Generate the JWTCookie Value
-func generateJWT() (string, error) {
+func generateJWT(hostname string, identity string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"foo": "bar",
-		"nbf": time.Date(2015, 10, 10, 12, 0, 0, 0, time.UTC).Unix(),
+		"sub": fmt.Sprintf("goog:%s", identity),
+		"iss": hostname,
+		"nbf": time.Now().UTC().Unix(),
 	})
 
 	// Sign and get the complete encoded token as a string using the secret
 	tokenString, err := token.SignedString("secret")
+	log.Printf("Made JWT: %o, %s", token, tokenString)
 	return tokenString, err
 }
 
