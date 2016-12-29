@@ -410,8 +410,8 @@ func (c *conf) cookieDomain() string {
 func generateJWT(hostname string, identity string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": fmt.Sprintf("goog:%s", identity),
-		"iss": hostname,
-		"nbf": time.Now().UTC().Unix(),
+		//"iss": hostname,
+		//"nbf": time.Now().UTC().Unix(),
 	})
 
 	// Sign and get the complete encoded token as a string using the secret
