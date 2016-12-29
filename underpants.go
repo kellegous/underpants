@@ -379,7 +379,7 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 		Value:  generateJWT(),
 		Path:   "/",
 		Secure: true,
-		Domain: extractCookieDomain(d.config.Host),
+		//Domain: extractCookieDomain(d.config.Host),
 	})
 	//}
 
