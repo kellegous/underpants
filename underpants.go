@@ -372,17 +372,6 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 		Secure:   d.config.UseHTTPS(),
 	})
 
-	//Set the JWT Cookie if its safe to do so.
-	//if d.config.UseHTTPS() {
-	http.SetCookie(w, &http.Cookie{
-		Name:   "jwt_cookie",
-		Value:  generateJWT(),
-		Path:   "/",
-		Secure: true,
-		Domain: d.config.cookieDomain(),
-	})
-	//}
-
 	// TODO(knorton): validate the url string because it could totally
 	// be used to fuck with the http message.
 	http.Redirect(w, r, p, http.StatusFound)
@@ -605,6 +594,17 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 			HttpOnly: true,
 			Secure:   c.UseHTTPS(),
 		})
+
+		//Set the JWT Cookie if its safe to do so.
+		if c.UseHTTPS() {
+			http.SetCookie(w, &http.Cookie{
+				Name:   "jwt_cookie",
+				Value:  generateJWT(),
+				Path:   "/",
+				Secure: true,
+				Domain: c.cookieDomain(),
+			})
+		}
 
 		p := back.Path
 		if back.RawQuery != "" {
