@@ -372,9 +372,36 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 		Secure:   d.config.UseHTTPS(),
 	})
 
+	//Set the JWT Cookie if its safe to do so.
+	if d.config.UseHTTPS() {
+
+		http.SetCookie(w, &http.Cookie{
+			Name: "jwt_cookie",
+			Value: generateJWT(),
+			Path: "/",
+			Secure: true,
+			Domain: extractCookieDomain(d.config.Host)
+		})
+	}
+
 	// TODO(knorton): validate the url string because it could totally
 	// be used to fuck with the http message.
 	http.Redirect(w, r, p, http.StatusFound)
+}
+
+func extractCookieDomain(hostName string) {
+	parts = strings.Split(hostName, ".")
+	partLen = len(parts)
+	if partLen > 2 {
+		parts = parts[partLen - 1:partLen]
+	}
+
+	return strings.Join(parts, ".")
+}
+
+// Generate the JWTCookie Value
+func generateJWT() string {
+	return "fake cookie"
 }
 
 // Serve the request for a particular route.
