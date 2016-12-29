@@ -379,7 +379,7 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 		Value:  generateJWT(),
 		Path:   "/",
 		Secure: true,
-		//Domain: extractCookieDomain(d.config.Host),
+		Domain: d.config.cookieDomain(),
 	})
 	//}
 
@@ -388,14 +388,16 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, p, http.StatusFound)
 }
 
-func extractCookieDomain(hostName string) string {
-	var parts = strings.Split(hostName, ".")
+func (c *conf) cookieDomain() string {
+	var parts = strings.Split(c.Host, ".")
 	var partLen = len(parts)
 	if partLen > 2 {
 		parts = parts[partLen-1 : partLen]
 	}
 
-	return strings.Join(parts, ".")
+	var result = strings.Join(parts, ".")
+	log.Printf("JWT Cookie Domain: %s", result)
+	return result
 }
 
 // Generate the JWTCookie Value
