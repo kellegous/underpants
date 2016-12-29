@@ -338,6 +338,18 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 
 	copyHeaders(w.Header(), bp.Header)
 	w.WriteHeader(bp.StatusCode)
+
+	//Set the JWT Cookie if its safe to do so.
+	if d.config.UseHTTPS() {
+		http.SetCookie(w, &http.Cookie{
+			Name:   "jwt_cookie",
+			Value:  generateJWT(),
+			Path:   "/",
+			Secure: true,
+			Domain: d.config.cookieDomain(),
+		})
+	}
+
 	if _, err := io.Copy(w, bp.Body); err != nil {
 		panic(err)
 	}
@@ -594,17 +606,6 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 			HttpOnly: true,
 			Secure:   c.UseHTTPS(),
 		})
-
-		//Set the JWT Cookie if its safe to do so.
-		if c.UseHTTPS() {
-			http.SetCookie(w, &http.Cookie{
-				Name:   "jwt_cookie",
-				Value:  generateJWT(),
-				Path:   "/",
-				Secure: true,
-				Domain: c.cookieDomain(),
-			})
-		}
 
 		p := back.Path
 		if back.RawQuery != "" {
