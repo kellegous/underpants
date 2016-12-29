@@ -340,7 +340,7 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 	//Set the JWT Cookie if its safe to do so.
 	if d.config.UseHTTPS() {
 		token, err := generateJWT(d.config.Host, u.Email)
-		if err != nil {
+		if err == nil {
 			http.SetCookie(w, &http.Cookie{
 				Name:   "jwt_cookie",
 				Value:  token,
