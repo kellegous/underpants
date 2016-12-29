@@ -376,11 +376,11 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 	if d.config.UseHTTPS() {
 
 		http.SetCookie(w, &http.Cookie{
-			Name: "jwt_cookie",
-			Value: generateJWT(),
-			Path: "/",
+			Name:   "jwt_cookie",
+			Value:  generateJWT(),
+			Path:   "/",
 			Secure: true,
-			Domain: extractCookieDomain(d.config.Host)
+			Domain: extractCookieDomain(d.config.Host),
 		})
 	}
 
@@ -389,11 +389,11 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, p, http.StatusFound)
 }
 
-func extractCookieDomain(hostName string) {
-	parts = strings.Split(hostName, ".")
-	partLen = len(parts)
+func extractCookieDomain(hostName string) string {
+	var parts = strings.Split(hostName, ".")
+	var partLen = len(parts)
 	if partLen > 2 {
-		parts = parts[partLen - 1:partLen]
+		parts = parts[partLen-1 : partLen]
 	}
 
 	return strings.Join(parts, ".")
@@ -575,7 +575,6 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 		res, err := oc.Client(context.Background(), tok).Get("https://www.googleapis.com/oauth2/v1/userinfo?alt=json")
 		if err != nil {
 			panic(err)
-			return
 		}
 		defer res.Body.Close()
 
