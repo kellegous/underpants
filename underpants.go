@@ -373,16 +373,15 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 	})
 
 	//Set the JWT Cookie if its safe to do so.
-	if d.config.UseHTTPS() {
-
-		http.SetCookie(w, &http.Cookie{
-			Name:   "jwt_cookie",
-			Value:  generateJWT(),
-			Path:   "/",
-			Secure: true,
-			Domain: extractCookieDomain(d.config.Host),
-		})
-	}
+	//if d.config.UseHTTPS() {
+	http.SetCookie(w, &http.Cookie{
+		Name:   "jwt_cookie",
+		Value:  generateJWT(),
+		Path:   "/",
+		Secure: true,
+		Domain: extractCookieDomain(d.config.Host),
+	})
+	//}
 
 	// TODO(knorton): validate the url string because it could totally
 	// be used to fuck with the http message.
