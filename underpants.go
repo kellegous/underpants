@@ -231,6 +231,8 @@ type disp struct {
 	groups []string
 
 	scheme string
+
+	jwtSecret string
 }
 
 // Construct a URL to the oauth provider that with carry the provided URL as state
@@ -339,7 +341,7 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 
 	//Set the JWT Cookie if its safe to do so.
 	if d.config.UseHTTPS() {
-		token, err := generateJWT(d.config.Host, u.Email)
+		token, err := generateJWT(d.config.Host, u.Email, d.jwtSecret)
 		if err == nil {
 			http.SetCookie(w, &http.Cookie{
 				Name:   "jwt_cookie",
@@ -407,8 +409,7 @@ func (c *conf) cookieDomain() string {
 }
 
 // Generate the JWTCookie Value
-func generateJWT(hostname string, identity string) (string, error) {
-	log.Printf("Making JWT: %s -- %s", hostname, identity)
+func generateJWT(hostname string, identity string, secret string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": fmt.Sprintf("goog-%s", identity),
 		"iss": hostname,
@@ -416,8 +417,7 @@ func generateJWT(hostname string, identity string) (string, error) {
 	})
 
 	// Sign and get the complete encoded token as a string using the secret
-	tokenString, err := token.SignedString([]byte("secret"))
-	log.Printf("Made JWT: %o, %s", token, tokenString)
+	tokenString, err := token.SignedString([]byte(secret))
 	return tokenString, err
 }
 
@@ -506,7 +506,7 @@ func addSecurityHeadersFunc(c *conf, next func(http.ResponseWriter, *http.Reques
 }
 
 // Setup all handlers in a ServeMux.
-func setup(c *conf, port int) (*http.ServeMux, error) {
+func setup(c *conf, port int, jwtSecret string) (*http.ServeMux, error) {
 	m := http.NewServeMux()
 
 	// Construct the HMAC signing key
@@ -530,13 +530,14 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 		}
 
 		m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(c, &disp{
-			config: c,
-			route:  &route{host: uri.Host, scheme: uri.Scheme},
-			host:   host,
-			key:    key,
-			oauth:  oc,
-			groups: r.AllowedGroups,
-			scheme: scheme,
+			config:    c,
+			route:     &route{host: uri.Host, scheme: uri.Scheme},
+			host:      host,
+			key:       key,
+			oauth:     oc,
+			groups:    r.AllowedGroups,
+			scheme:    scheme,
+			jwtSecret: jwtSecret,
 		}))
 	}
 
@@ -760,6 +761,7 @@ func ListenAndServe(addr string, cfg *conf, m *http.ServeMux) error {
 
 func main() {
 	flagPort := flag.Int("port", 0, "")
+	flagJwtSecret := flag.String("jwt_secret", "", "")
 	flagConf := flag.String("conf", "underpants.json", "")
 
 	flag.Parse()
@@ -776,7 +778,12 @@ func main() {
 			*flagPort = 80
 		}
 	}
-	m, err := setup(c, *flagPort)
+
+	if *flagJwtSecret == "" {
+		panic("jwt_secret must be set")
+	}
+
+	m, err := setup(c, *flagPort, *flagJwtSecret)
 	if err != nil {
 		panic(err)
 	}
