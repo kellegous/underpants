@@ -410,13 +410,13 @@ func (c *conf) cookieDomain() string {
 func generateJWT(hostname string, identity string) (string, error) {
 	log.Printf("Making JWT: %s -- %s", hostname, identity)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-	//"sub": fmt.Sprintf("goog-%s", identity),
-	//"iss": hostname,
-	//"nbf": time.Now().UTC().Unix(),
+		"sub": fmt.Sprintf("goog-%s", identity),
+		"iss": hostname,
+		"nbf": time.Now().UTC().Unix(),
 	})
 
 	// Sign and get the complete encoded token as a string using the secret
-	tokenString, err := token.SignedString("secret")
+	tokenString, err := token.SignedString([]byte("secret"))
 	log.Printf("Made JWT: %o, %s", token, tokenString)
 	return tokenString, err
 }
