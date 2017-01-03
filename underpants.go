@@ -411,7 +411,7 @@ func (c *conf) cookieDomain() string {
 // Generate the JWTCookie Value
 func generateJWT(hostname string, identity string, secret string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": fmt.Sprintf("goog-%s", identity),
+		"sub": fmt.Sprintf("goog:%s", identity),
 		"iss": hostname,
 		"nbf": time.Now().UTC().Unix(),
 	})
