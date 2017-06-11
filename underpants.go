@@ -98,6 +98,10 @@ type conf struct {
 		// A special group, `*`, may be specified which allows any authenticated
 		// user.
 		AllowedGroups []string `json:"allowed-groups"`
+
+		// Fix the host header on the requst to the backend proxied service to match
+		// what came in through the front door.
+		FixHost bool
 	}
 }
 
@@ -219,6 +223,9 @@ type disp struct {
 
 	// The groups which may access this backend.
 	groups []string
+
+	// if the host header is to be fixed for this dispatcher or not
+	fixhost bool
 }
 
 // Construct a URL to the oauth provider that with carry the provided URL as state
@@ -318,6 +325,10 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 	// User information is passed to backends as headers.
 	br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
 	br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
+
+	if d.fixhost {
+		br.Host = d.host
+	}
 
 	bp, err := http.DefaultTransport.RoundTrip(br)
 	if err != nil {
@@ -434,6 +445,9 @@ func addSecurityHeaders(c *conf, next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if c.HasCerts() {
 				w.Header().Add("Strict-Transport-Security", "max-age=16070400; includeSubDomains")
+				r.Header.Add("X-Forwarded-Proto", "https")
+			} else {
+				r.Header.Add("X-Forwarded-Proto", "http")
 			}
 
 			w.Header().Add("X-Frame-Options", "SAMEORIGIN")
@@ -470,12 +484,13 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 		}
 
 		m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(c, &disp{
-			config: c,
-			route:  &route{host: uri.Host, scheme: uri.Scheme},
-			host:   host,
-			key:    key,
-			oauth:  oc,
-			groups: r.AllowedGroups,
+			config:  c,
+			route:   &route{host: uri.Host, scheme: uri.Scheme},
+			host:    host,
+			key:     key,
+			oauth:   oc,
+			groups:  r.AllowedGroups,
+			fixhost: r.FixHost,
 		}))
 	}
 
