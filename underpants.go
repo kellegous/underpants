@@ -443,11 +443,14 @@ func hostOf(name string, port int) string {
 func addSecurityHeaders(c *conf, next http.Handler) http.Handler {
 	if c.AddSecurityHeaders {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var proto = "http"
 			if c.HasCerts() {
 				w.Header().Add("Strict-Transport-Security", "max-age=16070400; includeSubDomains")
-				r.Header.Add("X-Forwarded-Proto", "https")
-			} else {
-				r.Header.Add("X-Forwarded-Proto", "http")
+				proto = "https"
+			}
+
+			if r.Header.Get("X-Forwarded-Proto") != "" {
+				r.Header.Add("X-Forwarded-Proto", proto)
 			}
 
 			w.Header().Add("X-Frame-Options", "SAMEORIGIN")
