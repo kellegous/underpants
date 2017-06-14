@@ -99,7 +99,7 @@ type conf struct {
 		// user.
 		AllowedGroups []string `json:"allowed-groups"`
 
-		// Fix the host header on the requst to the backend proxied service to match
+		// Fix the host header on the request to the backend proxied service to match
 		// what came in through the front door.
 		FixHost bool
 	}
@@ -480,6 +480,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 	// setup routes
 	oc := oauthConfig(c, port)
 	for _, r := range c.Routes {
+		fmt.Printf("setting up for host : %s\n", r.From)
 		host := hostOf(r.From, port)
 		uri, err := url.Parse(r.To)
 		if err != nil {
@@ -503,6 +504,7 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 
 	// setup admin
 	m.Handle("/", addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Printf("host is : %s\n", r.Host)
 		switch r.URL.Path {
 		case "/":
 			u := userFrom(r, key)
