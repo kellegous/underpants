@@ -101,7 +101,7 @@ type conf struct {
 
 		// Fix the host header on the request to the backend proxied service to match
 		// what came in through the front door.
-		FixHost bool
+		RetainHost bool `json:"retain-host-header"`
 	}
 }
 
@@ -225,7 +225,7 @@ type disp struct {
 	groups []string
 
 	// if the host header is to be fixed for this dispatcher or not
-	fixhost bool
+	RetainHost bool
 }
 
 // Construct a URL to the oauth provider that with carry the provided URL as state
@@ -326,7 +326,7 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 	br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
 	br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
 
-	if d.fixhost {
+	if d.RetainHost {
 		br.Host = d.host
 	}
 
@@ -449,7 +449,7 @@ func addSecurityHeaders(c *conf, next http.Handler) http.Handler {
 				proto = "https"
 			}
 
-			if r.Header.Get("X-Forwarded-Proto") != "" {
+			if r.Header.Get("X-Forwarded-Proto") == "" {
 				r.Header.Add("X-Forwarded-Proto", proto)
 			}
 
@@ -480,7 +480,6 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 	// setup routes
 	oc := oauthConfig(c, port)
 	for _, r := range c.Routes {
-		fmt.Printf("setting up for host : %s\n", r.From)
 		host := hostOf(r.From, port)
 		uri, err := url.Parse(r.To)
 		if err != nil {
@@ -488,13 +487,13 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 		}
 
 		m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(c, &disp{
-			config:  c,
-			route:   &route{host: uri.Host, scheme: uri.Scheme},
-			host:    host,
-			key:     key,
-			oauth:   oc,
-			groups:  r.AllowedGroups,
-			fixhost: r.FixHost,
+			config:     c,
+			route:      &route{host: uri.Host, scheme: uri.Scheme},
+			host:       host,
+			key:        key,
+			oauth:      oc,
+			groups:     r.AllowedGroups,
+			RetainHost: r.RetainHost,
 		}))
 	}
 
