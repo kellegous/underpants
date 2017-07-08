@@ -52,6 +52,9 @@ are not a member of one of the authorized groups by default.  The special `*`
 group can be used to allow any authenticated user access to the route.  See
 `underpants.sample.groups.json` for a configuration sample.
 
+If your backend is a build system or some other platform that will build URLs on the fly based on the request and needs
+the original `Host` header add in the `retain-host-header` flag and it will be passed through.
+
 ## Running
 
 Just run it; it's an executable.

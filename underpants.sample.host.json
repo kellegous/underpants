@@ -1,0 +1,16 @@
+{
+  "host" : "underpants.company.com",
+  "oauth" : {
+    "domain"        : "company.com",
+    "client-id"     : "oauth-client-id",
+    "client-secret" : "oauth-client-secret"
+  },
+  "use-strict-security-headers": true,
+  "routes" : [
+    {
+      "from" : "builder.company.com",
+      "to"   : "http://localhost:8080",
+      "retain-host-header" : true
+    }
+  ]
+}
