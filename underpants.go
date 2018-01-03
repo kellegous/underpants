@@ -89,8 +89,8 @@ type conf struct {
 
 		// The base authority (i.e. http://backend.example.com:8080) for the backend. Backends
 		// can be referenced through either http:// or https:// base urls. If you provide a
-		// non-root (i.e. http://example.com/foo/bar/) URL, the path of the URL will be
-		// discarded.
+		// non-root (i.e. http://example.com/foo/bar/) URL, the path will be merged with the
+		// request path as per RFC 3986 Section 5.2.
 		To string
 
 		// A list of groups which may access this route.  If groups are configured,
@@ -120,12 +120,6 @@ func (c *conf) Scheme() string {
 		return "https"
 	}
 	return "http"
-}
-
-// Represents the end-point for a backend. This is used at runtime to dispatch requests.
-type route struct {
-	host   string
-	scheme string
 }
 
 // A user (as represented by Google OAuth)
@@ -209,7 +203,7 @@ type disp struct {
 	host string
 
 	// The route to the relevant backend
-	route *route
+	route *url.URL
 
 	// The signing key to use for authenticity
 	key []byte
@@ -304,7 +298,12 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	br, err := http.NewRequest(r.Method, urlFor(d.route.scheme, d.route.host, r).String(), r.Body)
+	rebase, err := d.route.Parse(strings.TrimLeft(r.URL.RequestURI(), "/"))
+	if err != nil {
+		panic(err)
+	}
+
+	br, err := http.NewRequest(r.Method, rebase.String(), r.Body)
 	if err != nil {
 		panic(err)
 	}
@@ -464,14 +463,14 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 	oc := oauthConfig(c, port)
 	for _, r := range c.Routes {
 		host := hostOf(r.From, port)
-		uri, err := url.Parse(r.To)
+		route, err := url.Parse(r.To)
 		if err != nil {
 			return nil, err
 		}
 
 		m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(c, &disp{
 			config: c,
-			route:  &route{host: uri.Host, scheme: uri.Scheme},
+			route:  route,
 			host:   host,
 			key:    key,
 			oauth:  oc,
