@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kellegous/underpants/config"
+
 	"golang.org/x/crypto/ssh/terminal"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
@@ -43,84 +45,6 @@ const (
 	// revalidation
 	authMaxAge = 3600
 )
-
-// A configuration object that is loaded directly from the json config file.
-type conf struct {
-	// The host (without the port specification) that will be acting as the hub
-	Host string
-
-	// Google OAuth related settings
-	Oauth struct {
-		ClientId     string `json:"client-id"`
-		ClientSecret string `json:"client-secret"`
-		Domain       string `json:"domain"`
-	}
-
-	// Whether or not to add a set of security headers to all HTTP responses:
-	//
-	//    Strict-Transport-Security -- if certs are present, enforce HTTPS
-	//    Cache-Control: private, no-cache -- prevent downstream caching
-	//    Pragma: no-cache -- prevent HTTP/1.0 downstream caching
-	//    X-Frame-Options: SAMEORIGIN -- prevent clickjacking
-	//
-	// Enable this if it your applications are OK with it and you want additional
-	// security.
-	AddSecurityHeaders bool `json:"use-strict-security-headers"`
-
-	// TLS certificiate files to enable https on the hub and endpoints. TLS is highly
-	// recommended and it is global. You cannot run some routes over HTTP and others over
-	// HTTPS. If you need to do this, you should use two instances of underpants (one on
-	// port 80 and the other on 443).
-	Certs []struct {
-		Crt string
-		Key string
-	}
-
-	// A mapping of group names to lists of user email addresses that are members
-	// of that group.  If this section is present, then the default behaviour for
-	// a route is to deny all users not in a group on its allowed-groups list.
-	Groups map[string][]string
-
-	// The mappings from hostname to backend server.
-	Routes []struct {
-
-		// The hostname (excluding port) for the public facing hostname.
-		From string
-
-		// The base authority (i.e. http://backend.example.com:8080) for the backend. Backends
-		// can be referenced through either http:// or https:// base urls. If you provide a
-		// non-root (i.e. http://example.com/foo/bar/) URL, the path will be merged with the
-		// request path as per RFC 3986 Section 5.2.
-		To string
-
-		// A list of groups which may access this route.  If groups are configured,
-		// users who are not a member of one of these groups will be denied access.
-		// A special group, `*`, may be specified which allows any authenticated
-		// user.
-		AllowedGroups []string `json:"allowed-groups"`
-	}
-}
-
-// Used to dermine if the instance is running over HTTP or HTTPS, this indicates whether
-// any certificates were included in the configuration.
-func (c *conf) HasCerts() bool {
-	return len(c.Certs) > 0
-}
-
-// Used to determine if the instance is configured for more granular group-based access
-// control lists.
-func (c *conf) HasGroups() bool {
-	return len(c.Groups) > 0
-}
-
-// A convience method for getting the relevant scheme based on whether certificates were
-// included in the configuration.
-func (c *conf) Scheme() string {
-	if len(c.Certs) > 0 {
-		return "https"
-	}
-	return "http"
-}
 
 // A user (as represented by Google OAuth)
 type user struct {
@@ -196,7 +120,7 @@ func decodeUser(c string, key []byte) (*user, error) {
 // be shared among http serving go routines.
 type disp struct {
 	// A copy of the original configuration
-	config *conf
+	config *config.Info
 
 	// The host of the hub consistent with url.URL.Host, which is essentially the entire
 	// authority of the URL. Examples: hub.monetology.com or hub.monetology.com:4080
@@ -264,7 +188,7 @@ func urlFor(scheme, host string, r *http.Request) *url.URL {
 	return &u
 }
 
-func userMemberOf(c *conf, u *user, groups []string) bool {
+func userMemberOf(c *config.Info, u *user, groups []string) bool {
 	for _, group := range groups {
 		if group == "*" {
 			return true
@@ -280,8 +204,8 @@ func userMemberOf(c *conf, u *user, groups []string) bool {
 	return false
 }
 
-// Serve the response by proxying it to the backend represented by the disp object.
-func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
+// serveHTTPProxy serves the response by proxying it to the backend represented by the disp object.
+func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r, d.key)
 	if u == nil {
 		http.Redirect(w, r,
@@ -332,7 +256,7 @@ func serveHttpProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 }
 
 // Serve the request as an authentication request.
-func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
+func serveHTTPAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 	c, p := r.FormValue("c"), r.FormValue("p")
 	if c == "" || !strings.HasPrefix(p, "/") {
 		http.Error(w,
@@ -369,16 +293,16 @@ func serveHttpAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 func (d *disp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	if strings.HasPrefix(p, authPathPrefix) {
-		serveHttpAuth(d, w, r)
+		serveHTTPAuth(d, w, r)
 	} else {
-		serveHttpProxy(d, w, r)
+		serveHTTPProxy(d, w, r)
 	}
 }
 
 // Construct an OAuth configuration object.
-func oauthConfig(c *conf, port int) *oauth2.Config {
+func oauthConfig(c *config.Info, port int) *oauth2.Config {
 	return &oauth2.Config{
-		ClientID:     c.Oauth.ClientId,
+		ClientID:     c.Oauth.ClientID,
 		ClientSecret: c.Oauth.ClientSecret,
 		Endpoint:     google.Endpoint,
 		Scopes: []string{
@@ -387,22 +311,6 @@ func oauthConfig(c *conf, port int) *oauth2.Config {
 		},
 		RedirectURL: fmt.Sprintf("%s://%s%s", c.Scheme(), hostOf(c.Host, port), authPathPrefix),
 	}
-}
-
-// Load the configuration objects from the given filename.
-func config(filename string) (*conf, error) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	var c conf
-	if err := json.NewDecoder(f).Decode(&c); err != nil {
-		return nil, err
-	}
-
-	return &c, nil
 }
 
 // Generate a new random key for HMAC signing. Server keys are completely emphemeral
@@ -428,7 +336,7 @@ func hostOf(name string, port int) string {
 	return fmt.Sprintf("%s:%d", name, port)
 }
 
-func addSecurityHeaders(c *conf, next http.Handler) http.Handler {
+func addSecurityHeaders(c *config.Info, next http.Handler) http.Handler {
 	if c.AddSecurityHeaders {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if c.HasCerts() {
@@ -440,17 +348,18 @@ func addSecurityHeaders(c *conf, next http.Handler) http.Handler {
 			w.Header().Add("Pragma", "no-cache")
 			next.ServeHTTP(w, r)
 		})
-	} else {
-		return next
 	}
+	return next
 }
 
-func addSecurityHeadersFunc(c *conf, next func(http.ResponseWriter, *http.Request)) http.Handler {
+func addSecurityHeadersFunc(
+	c *config.Info,
+	next func(http.ResponseWriter, *http.Request)) http.Handler {
 	return addSecurityHeaders(c, http.HandlerFunc(next))
 }
 
 // Setup all handlers in a ServeMux.
-func setup(c *conf, port int) (*http.ServeMux, error) {
+func setup(c *config.Info, port int) (*http.ServeMux, error) {
 	m := http.NewServeMux()
 
 	// Construct the HMAC signing key
@@ -530,7 +439,6 @@ func setup(c *conf, port int) (*http.ServeMux, error) {
 		res, err := oc.Client(context.Background(), tok).Get("https://www.googleapis.com/oauth2/v1/userinfo?alt=json")
 		if err != nil {
 			panic(err)
-			return
 		}
 		defer res.Body.Close()
 
@@ -612,7 +520,7 @@ func addrFrom(port int) string {
 	return fmt.Sprintf(":%d", port)
 }
 
-// Load the TLS certificate from the speciified files. The key file can be an encryped
+// LoadCertificate loads the TLS certificate from the speciified files. The key file can be an encryped
 // PEM so long as it carries the appropriate headers (Proc-Type and Dek-Info) and the
 // password will be requested interactively.
 func LoadCertificate(crtFile, keyFile string) (tls.Certificate, error) {
@@ -628,7 +536,7 @@ func LoadCertificate(crtFile, keyFile string) (tls.Certificate, error) {
 
 	keyDer, _ := pem.Decode(keyBytes)
 	if keyDer == nil {
-		return tls.Certificate{}, fmt.Errorf("%s cannot be decoded.", keyFile)
+		return tls.Certificate{}, fmt.Errorf("%s cannot be decoded", keyFile)
 	}
 
 	// http://www.ietf.org/rfc/rfc1421.txt
@@ -655,8 +563,8 @@ func LoadCertificate(crtFile, keyFile string) (tls.Certificate, error) {
 	}))
 }
 
-// Bind the listening port and start serving traffic.
-func ListenAndServe(addr string, cfg *conf, m *http.ServeMux) error {
+// ListenAndServe binds the listening port and start serving traffic.
+func ListenAndServe(addr string, cfg *config.Info, m *http.ServeMux) error {
 	if cfg.HasCerts() {
 		var certs []tls.Certificate
 		for _, item := range cfg.Certs {
@@ -703,24 +611,24 @@ func main() {
 
 	flag.Parse()
 
-	c, err := config(*flagConf)
-	if err != nil {
+	var cfg config.Info
+	if err := cfg.ReadFile(*flagConf); err != nil {
 		panic(err)
 	}
 
 	if *flagPort == 0 {
-		if c.HasCerts() {
+		if cfg.HasCerts() {
 			*flagPort = 443
 		} else {
 			*flagPort = 80
 		}
 	}
-	m, err := setup(c, *flagPort)
+	m, err := setup(&cfg, *flagPort)
 	if err != nil {
 		panic(err)
 	}
 
-	if err := ListenAndServe(addrFrom(*flagPort), c, m); err != nil {
+	if err := ListenAndServe(addrFrom(*flagPort), &cfg, m); err != nil {
 		panic(err)
 	}
 }
