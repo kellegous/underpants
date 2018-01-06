@@ -2,13 +2,9 @@ package main
 
 import (
 	"bytes"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"flag"
@@ -25,6 +21,7 @@ import (
 	"time"
 
 	"github.com/kellegous/underpants/config"
+	"github.com/kellegous/underpants/user"
 
 	"golang.org/x/crypto/ssh/terminal"
 	"golang.org/x/net/context"
@@ -46,74 +43,19 @@ const (
 	authMaxAge = 3600
 )
 
-// A user (as represented by Google OAuth)
-type user struct {
-	Email             string
-	Name              string
-	Picture           string
-	LastAuthenticated time.Time
-}
-
-// Encode the full user object as a base64 string that is suitable for including in
-// the cookie.
-func (u *user) encode(key []byte) (string, error) {
-	var b bytes.Buffer
-	h := hmac.New(sha256.New, key)
-	w := base64.NewEncoder(base64.URLEncoding,
-		io.MultiWriter(h, &b))
-	if err := json.NewEncoder(w).Encode(u); err != nil {
-		return "", err
-	}
-	w.Close()
-
-	return fmt.Sprintf("%s,%s",
-		base64.URLEncoding.EncodeToString(h.Sum(nil)),
-		b.String()), nil
-}
-
-// Validates an HMAC signed message using the specified key.
-func validMessage(key []byte, sig, msg string) bool {
-	s, err := base64.URLEncoding.DecodeString(sig)
+// decodeAndVerifyUser decodes the user from the cookie value and then verifies
+// that it is valid.
+func decodeAndVerifyUser(val string, key []byte) (*user.Info, error) {
+	u, err := user.Decode(val, key)
 	if err != nil {
-		return false
-	}
-
-	h := hmac.New(sha256.New, key)
-	h.Write([]byte(msg))
-	v := h.Sum(nil)
-	if len(v) != len(s) {
-		return false
-	}
-
-	if subtle.ConstantTimeCompare(s, v) != 1 {
-		return false
-	}
-
-	return true
-}
-
-// Using a key (for validation) and a base64 encoded string, re-construct the encoded
-// user that it represents.
-func decodeUser(c string, key []byte) (*user, error) {
-	s := strings.SplitN(c, ",", 2)
-
-	if len(s) != 2 || !validMessage(key, s[0], s[1]) {
-		return nil, fmt.Errorf("Invalid user cookie: %s", c)
-	}
-
-	var u user
-	r := base64.NewDecoder(base64.URLEncoding, bytes.NewBufferString(s[1]))
-	if err := json.NewDecoder(r).Decode(&u); err != nil {
 		return nil, err
 	}
 
-	now := time.Now()
-	age := now.Sub(u.LastAuthenticated)
-	if age.Seconds() >= authMaxAge {
+	if time.Now().Sub(u.LastAuthenticated).Seconds() >= authMaxAge {
 		return nil, fmt.Errorf("Cookie too old for: %s", u.Email)
 	}
 
-	return &u, nil
+	return u, nil
 }
 
 // Represents a route to a backend. This is fully immutable after construction and will
@@ -139,9 +81,9 @@ type disp struct {
 	groups []string
 }
 
-// Construct a URL to the oauth provider that with carry the provided URL as state
+// AuthCodeURL constructs a URL to the oauth provider that with carry the provided URL as state
 // through the authentication process.
-func (d *disp) AuthCodeUrl(u *url.URL) string {
+func (d *disp) AuthCodeURL(u *url.URL) string {
 	return fmt.Sprintf("%s&%s",
 		d.oauth.AuthCodeURL(u.String()),
 		url.Values{"hd": {d.config.Oauth.Domain}}.Encode())
@@ -158,7 +100,7 @@ func copyHeaders(dst, src http.Header) {
 
 // Extract a user object from the http request.  The key is used for HMAC
 // signature verification.
-func userFrom(r *http.Request, key []byte) *user {
+func userFrom(r *http.Request, key []byte) *user.Info {
 	c, err := r.Cookie(userCookieKey)
 	if err != nil || c.Value == "" {
 		return nil
@@ -170,7 +112,7 @@ func userFrom(r *http.Request, key []byte) *user {
 		return nil
 	}
 
-	u, err := decodeUser(v, key)
+	u, err := decodeAndVerifyUser(v, key)
 	if err != nil {
 		log.Printf("  Rejected: %s...", c.Value[:32])
 		return nil
@@ -188,7 +130,7 @@ func urlFor(scheme, host string, r *http.Request) *url.URL {
 	return &u
 }
 
-func userMemberOf(c *config.Info, u *user, groups []string) bool {
+func userMemberOf(c *config.Info, u *user.Info, groups []string) bool {
 	for _, group := range groups {
 		if group == "*" {
 			return true
@@ -209,7 +151,7 @@ func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r, d.key)
 	if u == nil {
 		http.Redirect(w, r,
-			d.AuthCodeUrl(urlFor(d.config.Scheme(), d.host, r)),
+			d.AuthCodeURL(urlFor(d.config.Scheme(), d.host, r)),
 			http.StatusFound)
 		return
 	}
@@ -266,7 +208,7 @@ func serveHTTPAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// verify the cookie
-	if _, err := decodeUser(c, d.key); err != nil {
+	if _, err := decodeAndVerifyUser(c, d.key); err != nil {
 		// do not redirect out of here because this indicates a big
 		// problem and we're likely to get into a redir loop.
 		http.Error(w,
@@ -442,7 +384,10 @@ func setup(c *config.Info, port int) (*http.ServeMux, error) {
 		}
 		defer res.Body.Close()
 
-		u := user{LastAuthenticated: time.Now()}
+		u := user.Info{
+			LastAuthenticated: time.Now(),
+		}
+
 		if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
 			panic(err)
 		}
@@ -455,7 +400,7 @@ func setup(c *config.Info, port int) (*http.ServeMux, error) {
 			return
 		}
 
-		v, err := u.encode(key)
+		v, err := u.Encode(key)
 		if err != nil {
 			panic(err)
 		}
