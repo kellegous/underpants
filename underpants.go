@@ -301,7 +301,7 @@ func addSecurityHeadersFunc(
 }
 
 // Setup all handlers in a ServeMux.
-func setup(c *config.Info, port int) (*http.ServeMux, error) {
+func setup(ctx *config.Context) (*http.ServeMux, error) {
 	m := http.NewServeMux()
 
 	// Construct the HMAC signing key
@@ -311,16 +311,16 @@ func setup(c *config.Info, port int) (*http.ServeMux, error) {
 	}
 
 	// setup routes
-	oc := oauthConfig(c, port)
-	for _, r := range c.Routes {
-		host := hostOf(r.From, port)
+	oc := oauthConfig(ctx.Info, ctx.Port)
+	for _, r := range ctx.Routes {
+		host := hostOf(r.From, ctx.Port)
 		route, err := url.Parse(r.To)
 		if err != nil {
 			return nil, err
 		}
 
-		m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(c, &disp{
-			config: c,
+		m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(ctx.Info, &disp{
+			config: ctx.Info,
 			route:  route,
 			host:   host,
 			key:    key,
@@ -334,7 +334,7 @@ func setup(c *config.Info, port int) (*http.ServeMux, error) {
 	t := template.Must(template.New("index.html").Parse(rootTmpl))
 
 	// setup admin
-	m.Handle("/", addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
+	m.Handle("/", addSecurityHeadersFunc(ctx.Info, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/":
 			u := userFrom(r, key)
@@ -353,7 +353,7 @@ func setup(c *config.Info, port int) (*http.ServeMux, error) {
 		}
 	}))
 
-	m.Handle(authPathPrefix, addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
+	m.Handle(authPathPrefix, addSecurityHeadersFunc(ctx.Info, func(w http.ResponseWriter, r *http.Request) {
 		code := r.FormValue("code")
 		stat := r.FormValue("state")
 		if code == "" || stat == "" {
@@ -393,7 +393,7 @@ func setup(c *config.Info, port int) (*http.ServeMux, error) {
 		}
 
 		// this only happens when someone edits the auth url
-		if !strings.HasSuffix(u.Email, "@"+c.Oauth.Domain) {
+		if !strings.HasSuffix(u.Email, "@"+ctx.Oauth.Domain) {
 			http.Error(w,
 				http.StatusText(http.StatusForbidden),
 				http.StatusForbidden)
@@ -411,7 +411,7 @@ func setup(c *config.Info, port int) (*http.ServeMux, error) {
 			Path:     "/",
 			MaxAge:   authMaxAge,
 			HttpOnly: true,
-			Secure:   c.HasCerts(),
+			Secure:   ctx.HasCerts(),
 		})
 
 		p := back.Path
@@ -420,7 +420,7 @@ func setup(c *config.Info, port int) (*http.ServeMux, error) {
 		}
 
 		http.Redirect(w, r,
-			fmt.Sprintf("%s://%s%s?%s", c.Scheme(), back.Host, authPathPrefix,
+			fmt.Sprintf("%s://%s%s?%s", ctx.Scheme(), back.Host, authPathPrefix,
 				url.Values{
 					"p": {p},
 					"c": {v},
@@ -430,7 +430,7 @@ func setup(c *config.Info, port int) (*http.ServeMux, error) {
 
 	m.Handle(
 		fmt.Sprintf("%slogout", authPathPrefix),
-		addSecurityHeadersFunc(c, func(w http.ResponseWriter, r *http.Request) {
+		addSecurityHeadersFunc(ctx.Info, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != "POST" {
 				http.Error(w,
 					http.StatusText(http.StatusMethodNotAllowed),
@@ -451,18 +451,6 @@ func setup(c *config.Info, port int) (*http.ServeMux, error) {
 		}))
 
 	return m, nil
-}
-
-// Determine the addr specification that will be passed to a net.Listener.
-func addrFrom(port int) string {
-	switch port {
-	case 80:
-		return ":http"
-	case 443:
-		return ":https"
-	}
-
-	return fmt.Sprintf(":%d", port)
 }
 
 // LoadCertificate loads the TLS certificate from the speciified files. The key file can be an encryped
@@ -509,10 +497,10 @@ func LoadCertificate(crtFile, keyFile string) (tls.Certificate, error) {
 }
 
 // ListenAndServe binds the listening port and start serving traffic.
-func ListenAndServe(addr string, cfg *config.Info, m *http.ServeMux) error {
-	if cfg.HasCerts() {
+func ListenAndServe(ctx *config.Context, m *http.ServeMux) error {
+	if ctx.HasCerts() {
 		var certs []tls.Certificate
-		for _, item := range cfg.Certs {
+		for _, item := range ctx.Certs {
 			crt, err := LoadCertificate(item.Crt, item.Key)
 			if err != nil {
 				return err
@@ -520,6 +508,8 @@ func ListenAndServe(addr string, cfg *config.Info, m *http.ServeMux) error {
 
 			certs = append(certs, crt)
 		}
+
+		addr := ctx.ListenAddr()
 
 		s := &http.Server{
 			Addr:    addr,
@@ -547,7 +537,22 @@ func ListenAndServe(addr string, cfg *config.Info, m *http.ServeMux) error {
 		return s.Serve(tls.NewListener(conn, s.TLSConfig))
 	}
 
-	return http.ListenAndServe(addr, m)
+	return http.ListenAndServe(ctx.ListenAddr(), m)
+}
+
+func contextFrom(cfg *config.Info, port int) *config.Context {
+	if port == 0 {
+		if cfg.HasCerts() {
+			port = 443
+		} else {
+			port = 80
+		}
+	}
+
+	return &config.Context{
+		Info: cfg,
+		Port: port,
+	}
 }
 
 func main() {
@@ -561,19 +566,14 @@ func main() {
 		panic(err)
 	}
 
-	if *flagPort == 0 {
-		if cfg.HasCerts() {
-			*flagPort = 443
-		} else {
-			*flagPort = 80
-		}
-	}
-	m, err := setup(&cfg, *flagPort)
+	ctx := contextFrom(&cfg, *flagPort)
+
+	m, err := setup(ctx)
 	if err != nil {
 		panic(err)
 	}
 
-	if err := ListenAndServe(addrFrom(*flagPort), &cfg, m); err != nil {
+	if err := ListenAndServe(ctx, m); err != nil {
 		panic(err)
 	}
 }
