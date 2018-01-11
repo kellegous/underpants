@@ -1,4 +1,4 @@
-ilanguage: go
+language: go
 
 go:
   - 1.7
