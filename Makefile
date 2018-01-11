@@ -1,2 +1,3 @@
 test:
-	go test github.com/kellegous/underpants/mux
+	go test github.com/kellegous/underpants/mux \
+		github.com/kellegous/underpants/util
