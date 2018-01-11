@@ -5,17 +5,22 @@ import (
 	"os"
 )
 
+// OAuthInfo ...
+type OAuthInfo struct {
+	ClientID     string `json:"client-id"`
+	ClientSecret string `json:"client-secret"`
+
+	// Google provider properties
+	Domain string `json:"domain"`
+}
+
 // Info is a configuration object that is loaded directly from the json config file.
 type Info struct {
 	// The host (without the port specification) that will be acting as the hub
 	Host string
 
-	// Google OAuth related settings
-	Oauth struct {
-		ClientID     string `json:"client-id"`
-		ClientSecret string `json:"client-secret"`
-		Domain       string `json:"domain"`
-	}
+	// OAuth related settings
+	Oauth OAuthInfo
 
 	// Whether or not to add a set of security headers to all HTTP responses:
 	//

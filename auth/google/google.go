@@ -65,7 +65,15 @@ func fetchUser(cfg *oauth2.Config, tok *oauth2.Token) (*user.Info, error) {
 }
 
 func (p *provider) GetAuthURL(ctx *config.Context, r *http.Request) (string, error) {
-	return configFor(ctx).AuthCodeURL(r.URL.String()), nil
+	u := configFor(ctx).AuthCodeURL(
+		auth.GetCurrentURL(ctx, r).String())
+
+	// If the config is restricting by domain, then add that to the auth url.
+	if d := ctx.Oauth.Domain; d != "" {
+		u += fmt.Sprintf("&hd=%s", url.QueryEscape(d))
+	}
+
+	return u, nil
 }
 
 func (p *provider) Authenticate(ctx *config.Context, r *http.Request) (*user.Info, *url.URL, error) {
