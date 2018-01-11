@@ -19,3 +19,11 @@ type Provider interface {
 	GetAuthURL(ctx *config.Context, r *http.Request) (string, error)
 	Authenticate(ctx *config.Context, r *http.Request) (*user.Info, *url.URL, error)
 }
+
+// GetCurrentURL returns the URL for the current request.
+func GetCurrentURL(ctx *config.Context, r *http.Request) *url.URL {
+	u := *r.URL
+	u.Host = r.Host
+	u.Scheme = ctx.Scheme()
+	return &u
+}
