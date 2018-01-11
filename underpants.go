@@ -20,9 +20,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kellegous/underpants/auth"
 	"github.com/kellegous/underpants/config"
 	"github.com/kellegous/underpants/mux"
 	"github.com/kellegous/underpants/user"
+
+	goog "github.com/kellegous/underpants/auth/google"
 
 	"golang.org/x/crypto/ssh/terminal"
 	"golang.org/x/net/context"
@@ -63,7 +66,7 @@ func decodeAndVerifyUser(val string, key []byte) (*user.Info, error) {
 // be shared among http serving go routines.
 type disp struct {
 	// A copy of the original configuration
-	config *config.Info
+	ctx *config.Context
 
 	// The host of the hub consistent with url.URL.Host, which is essentially the entire
 	// authority of the URL. Examples: hub.monetology.com or hub.monetology.com:4080
@@ -87,7 +90,7 @@ type disp struct {
 func (d *disp) AuthCodeURL(u *url.URL) string {
 	return fmt.Sprintf("%s&%s",
 		d.oauth.AuthCodeURL(u.String()),
-		url.Values{"hd": {d.config.Oauth.Domain}}.Encode())
+		url.Values{"hd": {d.ctx.Oauth.Domain}}.Encode())
 }
 
 // Copy the HTTP headers from one collection to another.
@@ -147,18 +150,23 @@ func userMemberOf(c *config.Info, u *user.Info, groups []string) bool {
 	return false
 }
 
+// TODO(knorton): Expand this.
+func getAuthProvider(cfg *config.Info) (auth.Provider, error) {
+	return goog.Provider, nil
+}
+
 // serveHTTPProxy serves the response by proxying it to the backend represented by the disp object.
 func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r, d.key)
 	if u == nil {
 		http.Redirect(w, r,
-			d.AuthCodeURL(urlFor(d.config.Scheme(), d.host, r)),
+			d.AuthCodeURL(urlFor(d.ctx.Scheme(), d.host, r)),
 			http.StatusFound)
 		return
 	}
 
-	if d.config.HasGroups() {
-		if !userMemberOf(d.config, u, d.groups) {
+	if d.ctx.HasGroups() {
+		if !userMemberOf(d.ctx.Info, u, d.groups) {
 			log.Printf("Denied %s access to %s", u.Email, d.host)
 			http.Error(w, "Forbidden: you are not a member of a group authorized to view this site.", http.StatusForbidden)
 			return
@@ -224,7 +232,7 @@ func serveHTTPAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   authMaxAge,
 		HttpOnly: true,
-		Secure:   d.config.HasCerts(),
+		Secure:   d.ctx.HasCerts(),
 	})
 
 	// TODO(knorton): validate the url string because it could totally
@@ -322,7 +330,7 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 
 		mb.ForHost(host).Handle("/",
 			addSecurityHeaders(ctx.Info, &disp{
-				config: ctx.Info,
+				ctx:    ctx,
 				route:  route,
 				host:   host,
 				key:    key,
