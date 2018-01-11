@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/kellegous/underpants/config"
+	"github.com/kellegous/underpants/mux"
 	"github.com/kellegous/underpants/user"
 
 	"golang.org/x/crypto/ssh/terminal"
@@ -301,8 +302,8 @@ func addSecurityHeadersFunc(
 }
 
 // Setup all handlers in a ServeMux.
-func setup(ctx *config.Context) (*http.ServeMux, error) {
-	m := http.NewServeMux()
+func setup(ctx *config.Context) (*mux.Serve, error) {
+	mb := mux.Create()
 
 	// Construct the HMAC signing key
 	key, err := newKey()
@@ -319,14 +320,15 @@ func setup(ctx *config.Context) (*http.ServeMux, error) {
 			return nil, err
 		}
 
-		m.Handle(fmt.Sprintf("%s/", host), addSecurityHeaders(ctx.Info, &disp{
-			config: ctx.Info,
-			route:  route,
-			host:   host,
-			key:    key,
-			oauth:  oc,
-			groups: r.AllowedGroups,
-		}))
+		mb.ForHost(host).Handle("/",
+			addSecurityHeaders(ctx.Info, &disp{
+				config: ctx.Info,
+				route:  route,
+				host:   host,
+				key:    key,
+				oauth:  oc,
+				groups: r.AllowedGroups,
+			}))
 	}
 
 	// load the template for the one piece of static content embedded in
@@ -334,123 +336,128 @@ func setup(ctx *config.Context) (*http.ServeMux, error) {
 	t := template.Must(template.New("index.html").Parse(rootTmpl))
 
 	// setup admin
-	m.Handle("/", addSecurityHeadersFunc(ctx.Info, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/":
-			u := userFrom(r, key)
-			w.Header().Set("Content-Type", "text/html;charset=utf-8")
-			if debugTmpl {
-				t, err := template.ParseFiles("index.html")
+	mb.ForAnyHost().Handle("/",
+		addSecurityHeadersFunc(ctx.Info,
+			func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/":
+					u := userFrom(r, key)
+					w.Header().Set("Content-Type", "text/html;charset=utf-8")
+					if debugTmpl {
+						t, err := template.ParseFiles("index.html")
+						if err != nil {
+							panic(err)
+						}
+						t.Execute(w, u)
+						return
+					}
+					t.Execute(w, u)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+
+	mb.ForAnyHost().Handle(authPathPrefix,
+		addSecurityHeadersFunc(ctx.Info,
+			func(w http.ResponseWriter, r *http.Request) {
+				code := r.FormValue("code")
+				stat := r.FormValue("state")
+				if code == "" || stat == "" {
+					http.Error(w,
+						http.StatusText(http.StatusForbidden),
+						http.StatusForbidden)
+					return
+				}
+
+				// If stat isn't a valid URL, this is totally bogus.
+				back, err := url.Parse(stat)
+				if err != nil {
+					http.Error(w,
+						http.StatusText(http.StatusForbidden),
+						http.StatusForbidden)
+					return
+				}
+
+				tok, err := oc.Exchange(context.Background(), code)
+				if err != nil {
+					http.Error(w, "Forbidden", http.StatusForbidden)
+					return
+				}
+
+				res, err := oc.Client(context.Background(), tok).Get("https://www.googleapis.com/oauth2/v1/userinfo?alt=json")
 				if err != nil {
 					panic(err)
 				}
-				t.Execute(w, u)
-				return
-			}
-			t.Execute(w, u)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
+				defer res.Body.Close()
 
-	m.Handle(authPathPrefix, addSecurityHeadersFunc(ctx.Info, func(w http.ResponseWriter, r *http.Request) {
-		code := r.FormValue("code")
-		stat := r.FormValue("state")
-		if code == "" || stat == "" {
-			http.Error(w,
-				http.StatusText(http.StatusForbidden),
-				http.StatusForbidden)
-			return
-		}
+				u := user.Info{
+					LastAuthenticated: time.Now(),
+				}
 
-		// If stat isn't a valid URL, this is totally bogus.
-		back, err := url.Parse(stat)
-		if err != nil {
-			http.Error(w,
-				http.StatusText(http.StatusForbidden),
-				http.StatusForbidden)
-			return
-		}
+				if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
+					panic(err)
+				}
 
-		tok, err := oc.Exchange(context.Background(), code)
-		if err != nil {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
+				// this only happens when someone edits the auth url
+				if !strings.HasSuffix(u.Email, "@"+ctx.Oauth.Domain) {
+					http.Error(w,
+						http.StatusText(http.StatusForbidden),
+						http.StatusForbidden)
+					return
+				}
 
-		res, err := oc.Client(context.Background(), tok).Get("https://www.googleapis.com/oauth2/v1/userinfo?alt=json")
-		if err != nil {
-			panic(err)
-		}
-		defer res.Body.Close()
+				v, err := u.Encode(key)
+				if err != nil {
+					panic(err)
+				}
 
-		u := user.Info{
-			LastAuthenticated: time.Now(),
-		}
+				http.SetCookie(w, &http.Cookie{
+					Name:     userCookieKey,
+					Value:    url.QueryEscape(v),
+					Path:     "/",
+					MaxAge:   authMaxAge,
+					HttpOnly: true,
+					Secure:   ctx.HasCerts(),
+				})
 
-		if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
-			panic(err)
-		}
+				p := back.Path
+				if back.RawQuery != "" {
+					p += fmt.Sprintf("?%s", back.RawQuery)
+				}
 
-		// this only happens when someone edits the auth url
-		if !strings.HasSuffix(u.Email, "@"+ctx.Oauth.Domain) {
-			http.Error(w,
-				http.StatusText(http.StatusForbidden),
-				http.StatusForbidden)
-			return
-		}
+				http.Redirect(w, r,
+					fmt.Sprintf("%s://%s%s?%s", ctx.Scheme(), back.Host, authPathPrefix,
+						url.Values{
+							"p": {p},
+							"c": {v},
+						}.Encode()),
+					http.StatusFound)
 
-		v, err := u.Encode(key)
-		if err != nil {
-			panic(err)
-		}
+			}))
 
-		http.SetCookie(w, &http.Cookie{
-			Name:     userCookieKey,
-			Value:    url.QueryEscape(v),
-			Path:     "/",
-			MaxAge:   authMaxAge,
-			HttpOnly: true,
-			Secure:   ctx.HasCerts(),
-		})
+	mb.ForAnyHost().Handle(fmt.Sprintf("%slogout", authPathPrefix),
+		addSecurityHeadersFunc(ctx.Info,
+			func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "POST" {
+					http.Error(w,
+						http.StatusText(http.StatusMethodNotAllowed),
+						http.StatusMethodNotAllowed)
+					return
+				}
 
-		p := back.Path
-		if back.RawQuery != "" {
-			p += fmt.Sprintf("?%s", back.RawQuery)
-		}
+				http.SetCookie(w, &http.Cookie{
+					Name:   userCookieKey,
+					Value:  "",
+					Path:   "/",
+					MaxAge: 0,
+				})
 
-		http.Redirect(w, r,
-			fmt.Sprintf("%s://%s%s?%s", ctx.Scheme(), back.Host, authPathPrefix,
-				url.Values{
-					"p": {p},
-					"c": {v},
-				}.Encode()),
-			http.StatusFound)
-	}))
+				// TODO(knorton): Convert this to simple html page
+				w.Header().Set("Content-Type", "text/plain")
+				fmt.Fprintln(w, "ok.")
+			}))
 
-	m.Handle(
-		fmt.Sprintf("%slogout", authPathPrefix),
-		addSecurityHeadersFunc(ctx.Info, func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != "POST" {
-				http.Error(w,
-					http.StatusText(http.StatusMethodNotAllowed),
-					http.StatusMethodNotAllowed)
-				return
-			}
-
-			http.SetCookie(w, &http.Cookie{
-				Name:   userCookieKey,
-				Value:  "",
-				Path:   "/",
-				MaxAge: 0,
-			})
-
-			// TODO(knorton): Convert this to simple html page
-			w.Header().Set("Content-Type", "text/plain")
-			fmt.Fprintln(w, "ok.")
-		}))
-
-	return m, nil
+	return mb.Build(), nil
 }
 
 // LoadCertificate loads the TLS certificate from the speciified files. The key file can be an encryped
@@ -497,7 +504,7 @@ func LoadCertificate(crtFile, keyFile string) (tls.Certificate, error) {
 }
 
 // ListenAndServe binds the listening port and start serving traffic.
-func ListenAndServe(ctx *config.Context, m *http.ServeMux) error {
+func ListenAndServe(ctx *config.Context, m http.Handler) error {
 	if ctx.HasCerts() {
 		var certs []tls.Certificate
 		for _, item := range ctx.Certs {

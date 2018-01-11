@@ -4,10 +4,6 @@
 
 Suppose you are a Google Apps customer and suppose you want to restrict access to some web servers to just the folks in your organization. Like, for instance, if you're building your internal apps on AWS. Pain in the ass, right? So put underpants in between the world and your backends and you can use your Google credentials to get in.
 
-## Go 1.9
-
-Underpants will currently not work if built with Go 1.9 due to a [breaking change](https://go-review.googlesource.com/c/go/+/38194) in `net/http`. A fix is in the works.
-
 ## Installation
 
 ```
