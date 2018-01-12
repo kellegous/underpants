@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"html/template"
@@ -25,6 +26,7 @@ import (
 	"github.com/kellegous/underpants/mux"
 	"github.com/kellegous/underpants/user"
 
+	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
@@ -85,34 +87,23 @@ func copyHeaders(dst, src http.Header) {
 
 // Extract a user object from the http request.  The key is used for HMAC
 // signature verification.
-func userFrom(r *http.Request, key []byte) *user.Info {
+func userFrom(r *http.Request, key []byte) (*user.Info, error) {
 	c, err := r.Cookie(userCookieKey)
 	if err != nil || c.Value == "" {
-		return nil
+		return nil, errors.New("empty cookie")
 	}
 
-	log.Printf("Cookie: %s...", c.Value[:32])
 	v, err := url.QueryUnescape(c.Value)
 	if err != nil {
-		return nil
+		return nil, errors.New("unable to escape cookie")
 	}
 
 	u, err := decodeAndVerifyUser(v, key)
 	if err != nil {
-		log.Printf("  Rejected: %s...", c.Value[:32])
-		return nil
+		return nil, errors.New("could not decode and verify user")
 	}
 
-	return u
-}
-
-// Find the rewritten URL for a request that is being proxied along a route to a
-// backend defined by the scheme and host.
-func urlFor(scheme, host string, r *http.Request) *url.URL {
-	u := *r.URL
-	u.Host = host
-	u.Scheme = scheme
-	return &u
+	return u, nil
 }
 
 func userMemberOf(c *config.Info, u *user.Info, groups []string) bool {
@@ -138,8 +129,11 @@ func getAuthProvider(cfg *config.Info) auth.Provider {
 
 // serveHTTPProxy serves the response by proxying it to the backend represented by the disp object.
 func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
-	u := userFrom(r, d.key)
-	if u == nil {
+	u, err := userFrom(r, d.key)
+	if err != nil {
+		zap.L().Info("authentication required",
+			zap.String("host", r.Host),
+			zap.String("uri", r.RequestURI))
 		http.Redirect(w, r,
 			getAuthProvider(d.ctx.Info).GetAuthURL(d.ctx, r),
 			http.StatusFound)
@@ -148,8 +142,12 @@ func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 
 	if d.ctx.HasGroups() {
 		if !userMemberOf(d.ctx.Info, u, d.groups) {
-			log.Printf("Denied %s access to %s", u.Email, d.host)
-			http.Error(w, "Forbidden: you are not a member of a group authorized to view this site.", http.StatusForbidden)
+			zap.L().Info("access denied (not in group)",
+				zap.String("host", d.host),
+				zap.String("user", u.Email))
+			http.Error(w,
+				"Forbidden: you are not a member of a group authorized to view this site.",
+				http.StatusForbidden)
 			return
 		}
 	}
@@ -173,6 +171,12 @@ func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 	// User information is passed to backends as headers.
 	br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
 	br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
+
+	zap.L().Info("proxying request",
+		zap.String("host", d.host),
+		zap.String("uri", r.RequestURI),
+		zap.String("dest", rebase.String()),
+		zap.String("user", u.Email))
 
 	bp, err := http.DefaultTransport.RoundTrip(br)
 	if err != nil {
@@ -314,7 +318,7 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 			func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/":
-					u := userFrom(r, key)
+					u, _ := userFrom(r, key)
 					w.Header().Set("Content-Type", "text/html;charset=utf-8")
 					if debugTmpl {
 						t, err := template.ParseFiles("index.html")
@@ -498,11 +502,29 @@ func contextFrom(cfg *config.Info, port int) *config.Context {
 	}
 }
 
+func setupLogger() error {
+	lg, err := zap.NewProduction()
+	if err != nil {
+		return err
+	}
+
+	zap.ReplaceGlobals(lg)
+	return nil
+}
+
 func main() {
 	flagPort := flag.Int("port", 0, "")
 	flagConf := flag.String("conf", "underpants.json", "")
 
 	flag.Parse()
+
+	if err := setupLogger(); err != nil {
+		log.Panic(err)
+	}
+
+	zap.L().Info("starting",
+		zap.Int("port", *flagPort),
+		zap.String("conf", *flagConf))
 
 	var cfg config.Info
 	if err := cfg.ReadFile(*flagConf); err != nil {
