@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -21,26 +20,18 @@ import (
 	"time"
 
 	"github.com/kellegous/underpants/auth"
+	"github.com/kellegous/underpants/auth/google"
 	"github.com/kellegous/underpants/config"
 	"github.com/kellegous/underpants/mux"
 	"github.com/kellegous/underpants/user"
 
-	goog "github.com/kellegous/underpants/auth/google"
-
 	"golang.org/x/crypto/ssh/terminal"
-	"golang.org/x/net/context"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 )
 
 // TODO(knorton): allow websockets to pass.
 const (
 	// the name of the auth cookie
 	userCookieKey = "u"
-
-	// the base path used for auth-related actions and callbacks. this will be
-	// available on the hub as well as each of the routes.
-	authPathPrefix = "/__auth__/"
 
 	// maximum age (in seconds) of an authorization cookie before we'll force
 	// revalidation
@@ -76,21 +67,11 @@ type disp struct {
 	route *url.URL
 
 	// The signing key to use for authenticity
+	// TODO(knorton): Move to context.
 	key []byte
-
-	// The OAuth configuration object needed for authentication.
-	oauth *oauth2.Config
 
 	// The groups which may access this backend.
 	groups []string
-}
-
-// AuthCodeURL constructs a URL to the oauth provider that with carry the provided URL as state
-// through the authentication process.
-func (d *disp) AuthCodeURL(u *url.URL) string {
-	return fmt.Sprintf("%s&%s",
-		d.oauth.AuthCodeURL(u.String()),
-		url.Values{"hd": {d.ctx.Oauth.Domain}}.Encode())
 }
 
 // Copy the HTTP headers from one collection to another.
@@ -151,8 +132,8 @@ func userMemberOf(c *config.Info, u *user.Info, groups []string) bool {
 }
 
 // TODO(knorton): Expand this.
-func getAuthProvider(cfg *config.Info) (auth.Provider, error) {
-	return goog.Provider, nil
+func getAuthProvider(cfg *config.Info) auth.Provider {
+	return google.Provider
 }
 
 // serveHTTPProxy serves the response by proxying it to the backend represented by the disp object.
@@ -160,7 +141,7 @@ func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r, d.key)
 	if u == nil {
 		http.Redirect(w, r,
-			d.AuthCodeURL(urlFor(d.ctx.Scheme(), d.host, r)),
+			getAuthProvider(d.ctx.Info).GetAuthURL(d.ctx, r),
 			http.StatusFound)
 		return
 	}
@@ -243,24 +224,10 @@ func serveHTTPAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 // Serve the request for a particular route.
 func (d *disp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
-	if strings.HasPrefix(p, authPathPrefix) {
+	if strings.HasPrefix(p, auth.BaseURI) {
 		serveHTTPAuth(d, w, r)
 	} else {
 		serveHTTPProxy(d, w, r)
-	}
-}
-
-// Construct an OAuth configuration object.
-func oauthConfig(c *config.Info, port int) *oauth2.Config {
-	return &oauth2.Config{
-		ClientID:     c.Oauth.ClientID,
-		ClientSecret: c.Oauth.ClientSecret,
-		Endpoint:     google.Endpoint,
-		Scopes: []string{
-			"https://www.googleapis.com/auth/userinfo.profile",
-			"https://www.googleapis.com/auth/userinfo.email",
-		},
-		RedirectURL: fmt.Sprintf("%s://%s%s", c.Scheme(), hostOf(c.Host, port), authPathPrefix),
 	}
 }
 
@@ -320,7 +287,6 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 	}
 
 	// setup routes
-	oc := oauthConfig(ctx.Info, ctx.Port)
 	for _, r := range ctx.Routes {
 		host := hostOf(r.From, ctx.Port)
 		route, err := url.Parse(r.To)
@@ -334,7 +300,6 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 				route:  route,
 				host:   host,
 				key:    key,
-				oauth:  oc,
 				groups: r.AllowedGroups,
 			}))
 	}
@@ -365,20 +330,10 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 				}
 			}))
 
-	mb.ForAnyHost().Handle(authPathPrefix,
+	mb.ForAnyHost().Handle(auth.BaseURI,
 		addSecurityHeadersFunc(ctx.Info,
 			func(w http.ResponseWriter, r *http.Request) {
-				code := r.FormValue("code")
-				stat := r.FormValue("state")
-				if code == "" || stat == "" {
-					http.Error(w,
-						http.StatusText(http.StatusForbidden),
-						http.StatusForbidden)
-					return
-				}
-
-				// If stat isn't a valid URL, this is totally bogus.
-				back, err := url.Parse(stat)
+				u, back, err := getAuthProvider(ctx.Info).Authenticate(ctx, r)
 				if err != nil {
 					http.Error(w,
 						http.StatusText(http.StatusForbidden),
@@ -386,33 +341,7 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 					return
 				}
 
-				tok, err := oc.Exchange(context.Background(), code)
-				if err != nil {
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
-
-				res, err := oc.Client(context.Background(), tok).Get("https://www.googleapis.com/oauth2/v1/userinfo?alt=json")
-				if err != nil {
-					panic(err)
-				}
-				defer res.Body.Close()
-
-				u := user.Info{
-					LastAuthenticated: time.Now(),
-				}
-
-				if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
-					panic(err)
-				}
-
-				// this only happens when someone edits the auth url
-				if !strings.HasSuffix(u.Email, "@"+ctx.Oauth.Domain) {
-					http.Error(w,
-						http.StatusText(http.StatusForbidden),
-						http.StatusForbidden)
-					return
-				}
+				u.LastAuthenticated = time.Now()
 
 				v, err := u.Encode(key)
 				if err != nil {
@@ -434,16 +363,15 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 				}
 
 				http.Redirect(w, r,
-					fmt.Sprintf("%s://%s%s?%s", ctx.Scheme(), back.Host, authPathPrefix,
+					fmt.Sprintf("%s://%s%s?%s", ctx.Scheme(), back.Host, auth.BaseURI,
 						url.Values{
 							"p": {p},
 							"c": {v},
 						}.Encode()),
 					http.StatusFound)
-
 			}))
 
-	mb.ForAnyHost().Handle(fmt.Sprintf("%slogout", authPathPrefix),
+	mb.ForAnyHost().Handle(fmt.Sprintf("%slogout", auth.BaseURI),
 		addSecurityHeadersFunc(ctx.Info,
 			func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != "POST" {
