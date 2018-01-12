@@ -5,7 +5,8 @@ import (
 	"os"
 )
 
-// OAuthInfo ...
+// OAuthInfo is the part of the configuration info that contains information
+// about the oauth provider.
 type OAuthInfo struct {
 	ClientID     string `json:"client-id"`
 	ClientSecret string `json:"client-secret"`
