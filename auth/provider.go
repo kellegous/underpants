@@ -16,7 +16,7 @@ const (
 
 // Provider ...
 type Provider interface {
-	GetAuthURL(ctx *config.Context, r *http.Request) (string, error)
+	GetAuthURL(ctx *config.Context, r *http.Request) string
 	Authenticate(ctx *config.Context, r *http.Request) (*user.Info, *url.URL, error)
 }
 

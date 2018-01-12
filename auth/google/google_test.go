@@ -29,12 +29,8 @@ func TestAuthURLWithoutDomain(t *testing.T) {
 		},
 	}
 
-	u, err := Provider.GetAuthURL(ctx, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	authURL, err := url.Parse(u)
+	authURL, err := url.Parse(
+		Provider.GetAuthURL(ctx, r))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,12 +80,8 @@ func TestAuthURLWith(t *testing.T) {
 		},
 	}
 
-	u, err := Provider.GetAuthURL(ctx, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	authURL, err := url.Parse(u)
+	authURL, err := url.Parse(
+		Provider.GetAuthURL(ctx, r))
 	if err != nil {
 		t.Fatal(err)
 	}

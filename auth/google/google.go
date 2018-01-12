@@ -64,7 +64,7 @@ func fetchUser(cfg *oauth2.Config, tok *oauth2.Token) (*user.Info, error) {
 	}, nil
 }
 
-func (p *provider) GetAuthURL(ctx *config.Context, r *http.Request) (string, error) {
+func (p *provider) GetAuthURL(ctx *config.Context, r *http.Request) string {
 	u := configFor(ctx).AuthCodeURL(
 		auth.GetCurrentURL(ctx, r).String())
 
@@ -73,7 +73,7 @@ func (p *provider) GetAuthURL(ctx *config.Context, r *http.Request) (string, err
 		u += fmt.Sprintf("&hd=%s", url.QueryEscape(d))
 	}
 
-	return u, nil
+	return u
 }
 
 func (p *provider) Authenticate(ctx *config.Context, r *http.Request) (*user.Info, *url.URL, error) {
