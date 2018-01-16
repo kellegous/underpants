@@ -2,7 +2,9 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
+	"strings"
 )
 
 // OAuthInfo is the part of the configuration info that contains information
@@ -18,6 +20,25 @@ type OAuthInfo struct {
 
 	// Okta provider properties
 	BaseURL string `json:"base-url"`
+}
+
+// RouteInfo is the part of the configuration info that contains information
+// about an individual route.
+type RouteInfo struct {
+	// The hostname (excluding port) for the public facing hostname.
+	From string
+
+	// The base authority (i.e. http://backend.example.com:8080) for the backend. Backends
+	// can be referenced through either http:// or https:// base urls. If you provide a
+	// non-root (i.e. http://example.com/foo/bar/) URL, the path will be merged with the
+	// request path as per RFC 3986 Section 5.2.
+	To string
+
+	// A list of groups which may access this route.  If groups are configured,
+	// users who are not a member of one of these groups will be denied access.
+	// A special group, `*`, may be specified which allows any authenticated
+	// user.
+	AllowedGroups []string `json:"allowed-groups"`
 }
 
 // Info is a configuration object that is loaded directly from the json config file.
@@ -54,23 +75,7 @@ type Info struct {
 	Groups map[string][]string
 
 	// The mappings from hostname to backend server.
-	Routes []struct {
-
-		// The hostname (excluding port) for the public facing hostname.
-		From string
-
-		// The base authority (i.e. http://backend.example.com:8080) for the backend. Backends
-		// can be referenced through either http:// or https:// base urls. If you provide a
-		// non-root (i.e. http://example.com/foo/bar/) URL, the path will be merged with the
-		// request path as per RFC 3986 Section 5.2.
-		To string
-
-		// A list of groups which may access this route.  If groups are configured,
-		// users who are not a member of one of these groups will be denied access.
-		// A special group, `*`, may be specified which allows any authenticated
-		// user.
-		AllowedGroups []string `json:"allowed-groups"`
-	}
+	Routes []RouteInfo
 }
 
 // HasCerts is used to dermine if the instance is running over HTTP or HTTPS, this indicates whether
@@ -94,6 +99,22 @@ func (i *Info) Scheme() string {
 	return "http"
 }
 
+func validateAndInit(n *Info) error {
+	if n.Oauth.BaseURL != "" {
+		n.Oauth.BaseURL = strings.TrimRight(n.Oauth.BaseURL, "/")
+	}
+
+	if n.Oauth.ClientID == "" {
+		return errors.New("oauth.client-id is required")
+	}
+
+	if n.Oauth.ClientSecret == "" {
+		return errors.New("oauth.client-secret is required")
+	}
+
+	return nil
+}
+
 // ReadFile loads the configuraiton info from the given file.
 func (i *Info) ReadFile(filename string) error {
 	*i = Info{}
@@ -104,5 +125,9 @@ func (i *Info) ReadFile(filename string) error {
 	}
 	defer r.Close()
 
-	return json.NewDecoder(r).Decode(i)
+	if err := json.NewDecoder(r).Decode(i); err != nil {
+		return err
+	}
+
+	return validateAndInit(i)
 }

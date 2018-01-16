@@ -16,7 +16,7 @@ func TestAuthURL(t *testing.T) {
 			Oauth: config.OAuthInfo{
 				ClientID:     "client_id",
 				ClientSecret: "client_secret",
-				BaseURL:      "https://oktapreview.com/",
+				BaseURL:      "https://oktapreview.com",
 			},
 			Host: "foo.com",
 		},
@@ -59,5 +59,15 @@ func TestAuthURL(t *testing.T) {
 			param,
 			exp,
 			vals[param])
+	}
+
+	if authURL.Host != "oktapreview.com" {
+		t.Fatalf("expected url to have host of oktapreview.com got %s",
+			authURL.Host)
+	}
+
+	if authURL.Path != "/oauth2/v1/authorize" {
+		t.Fatalf("expected url to have path of /oauth2/v1/authorize got %s",
+			authURL.Path)
 	}
 }
