@@ -7,10 +7,22 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
+)
+
+const (
+	// CookieKey is the name of the cookie used for authentication
+	CookieKey = "u"
+
+	// CookieMaxAge is the expiration age (in seconds) used for the authentication
+	// cookie
+	CookieMaxAge = 3600
 )
 
 // Info ...
@@ -72,4 +84,39 @@ func Decode(c string, key []byte) (*Info, error) {
 	}
 
 	return &u, nil
+}
+
+// DecodeAndVerify decodes the user but also validates that the encoded user object is
+// still valid.
+func DecodeAndVerify(c string, key []byte) (*Info, error) {
+	u, err := Decode(c, key)
+	if err != nil {
+		return nil, err
+	}
+
+	if time.Now().Sub(u.LastAuthenticated).Seconds() >= CookieMaxAge {
+		return nil, fmt.Errorf("Cookie too old for: %s", u.Email)
+	}
+
+	return u, nil
+}
+
+// DecodeFromRequest decodes the user from the cookie found in the http.Request.
+func DecodeFromRequest(r *http.Request, key []byte) (*Info, error) {
+	c, err := r.Cookie(CookieKey)
+	if err != nil || c.Value == "" {
+		return nil, errors.New("empty cookie")
+	}
+
+	v, err := url.QueryUnescape(c.Value)
+	if err != nil {
+		return nil, errors.New("unable to escape cookie")
+	}
+
+	u, err := DecodeAndVerify(v, key)
+	if err != nil {
+		return nil, errors.New("could not decode and verify user")
+	}
+
+	return u, nil
 }

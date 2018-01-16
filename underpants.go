@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
-	"errors"
 	"flag"
 	"fmt"
 	"html/template"
@@ -25,95 +24,12 @@ import (
 	"github.com/kellegous/underpants/auth/okta"
 	"github.com/kellegous/underpants/config"
 	"github.com/kellegous/underpants/mux"
+	"github.com/kellegous/underpants/proxy"
 	"github.com/kellegous/underpants/user"
 
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh/terminal"
 )
-
-const (
-	// the name of the auth cookie
-	userCookieKey = "u"
-
-	// maximum age (in seconds) of an authorization cookie before we'll force
-	// revalidation
-	authMaxAge = 3600
-)
-
-// decodeAndVerifyUser decodes the user from the cookie value and then verifies
-// that it is valid.
-func decodeAndVerifyUser(val string, key []byte) (*user.Info, error) {
-	u, err := user.Decode(val, key)
-	if err != nil {
-		return nil, err
-	}
-
-	if time.Now().Sub(u.LastAuthenticated).Seconds() >= authMaxAge {
-		return nil, fmt.Errorf("Cookie too old for: %s", u.Email)
-	}
-
-	return u, nil
-}
-
-// Represents a route to a backend. This is fully immutable after construction and will
-// be shared among http serving go routines.
-type disp struct {
-	ctx *config.Context
-
-	prv auth.Provider
-
-	route *config.RouteInfo
-
-	// The host of the hub consistent with url.URL.Host, which is essentially the entire
-	// authority of the URL. Examples: hub.monetology.com or hub.monetology.com:4080
-	host string
-}
-
-// Copy the HTTP headers from one collection to another.
-func copyHeaders(dst, src http.Header) {
-	for key, vals := range src {
-		for _, val := range vals {
-			dst.Add(key, val)
-		}
-	}
-}
-
-// Extract a user object from the http request.  The key is used for HMAC
-// signature verification.
-func userFrom(r *http.Request, key []byte) (*user.Info, error) {
-	c, err := r.Cookie(userCookieKey)
-	if err != nil || c.Value == "" {
-		return nil, errors.New("empty cookie")
-	}
-
-	v, err := url.QueryUnescape(c.Value)
-	if err != nil {
-		return nil, errors.New("unable to escape cookie")
-	}
-
-	u, err := decodeAndVerifyUser(v, key)
-	if err != nil {
-		return nil, errors.New("could not decode and verify user")
-	}
-
-	return u, nil
-}
-
-func userMemberOf(c *config.Info, u *user.Info, groups []string) bool {
-	for _, group := range groups {
-		if group == "*" {
-			return true
-		}
-
-		for _, allowedUser := range c.Groups[group] {
-			if u.Email == allowedUser {
-				return true
-			}
-		}
-	}
-
-	return false
-}
 
 // getAuthProvider returns the auth.Provider that was configured in the config info.
 func getAuthProvider(cfg *config.Info) (auth.Provider, error) {
@@ -127,115 +43,6 @@ func getAuthProvider(cfg *config.Info) (auth.Provider, error) {
 	return nil, fmt.Errorf("invalid oauth provider: %s", cfg.Oauth.Provider)
 }
 
-// serveHTTPProxy serves the response by proxying it to the backend represented by the disp object.
-func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
-	u, err := userFrom(r, d.ctx.Key)
-	if err != nil {
-		zap.L().Info("authentication required",
-			zap.String("host", r.Host),
-			zap.String("uri", r.RequestURI))
-		http.Redirect(w, r,
-			d.prv.GetAuthURL(d.ctx, r),
-			http.StatusFound)
-		return
-	}
-
-	if d.ctx.HasGroups() {
-		if !userMemberOf(d.ctx.Info, u, d.route.AllowedGroups) {
-			zap.L().Info("access denied (not in group)",
-				zap.String("host", d.host),
-				zap.String("user", u.Email))
-			http.Error(w,
-				"Forbidden: you are not a member of a group authorized to view this site.",
-				http.StatusForbidden)
-			return
-		}
-	}
-
-	rebase, err := d.route.ToURL().Parse(
-		strings.TrimLeft(r.URL.RequestURI(), "/"))
-	if err != nil {
-		panic(err)
-	}
-
-	br, err := http.NewRequest(r.Method, rebase.String(), r.Body)
-	if err != nil {
-		panic(err)
-	}
-
-	// Without passing on the original Content-Length, http.Client will use
-	// Transfer-Encoding: chunked which some HTTP servers fall down on.
-	br.ContentLength = r.ContentLength
-
-	copyHeaders(br.Header, r.Header)
-
-	// User information is passed to backends as headers.
-	br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
-	br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
-
-	zap.L().Info("proxying request",
-		zap.String("host", d.host),
-		zap.String("uri", r.RequestURI),
-		zap.String("dest", rebase.String()),
-		zap.String("user", u.Email))
-
-	bp, err := http.DefaultTransport.RoundTrip(br)
-	if err != nil {
-		panic(err)
-	}
-	defer bp.Body.Close()
-
-	copyHeaders(w.Header(), bp.Header)
-	w.WriteHeader(bp.StatusCode)
-	if _, err := io.Copy(w, bp.Body); err != nil {
-		panic(err)
-	}
-}
-
-// Serve the request as an authentication request.
-func serveHTTPAuth(d *disp, w http.ResponseWriter, r *http.Request) {
-	c, p := r.FormValue("c"), r.FormValue("p")
-	if c == "" || !strings.HasPrefix(p, "/") {
-		http.Error(w,
-			http.StatusText(http.StatusBadRequest),
-			http.StatusBadRequest)
-		return
-	}
-
-	// verify the cookie
-	if _, err := decodeAndVerifyUser(c, d.ctx.Key); err != nil {
-		// do not redirect out of here because this indicates a big
-		// problem and we're likely to get into a redir loop.
-		http.Error(w,
-			http.StatusText(http.StatusForbidden),
-			http.StatusForbidden)
-		return
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     userCookieKey,
-		Value:    url.QueryEscape(c),
-		Path:     "/",
-		MaxAge:   authMaxAge,
-		HttpOnly: true,
-		Secure:   d.ctx.HasCerts(),
-	})
-
-	// TODO(knorton): validate the url string because it could totally
-	// be used to fuck with the http message.
-	http.Redirect(w, r, p, http.StatusFound)
-}
-
-// Serve the request for a particular route.
-func (d *disp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p := r.URL.Path
-	if strings.HasPrefix(p, auth.BaseURI) {
-		serveHTTPAuth(d, w, r)
-	} else {
-		serveHTTPProxy(d, w, r)
-	}
-}
-
 // Generate a new random key for HMAC signing. Server keys are completely emphemeral
 // in that the key is generated at server startup and not persisted between restarts.
 // This means all cookies are invalidated just by restarting the server. This is
@@ -247,16 +54,6 @@ func newKey() ([]byte, error) {
 	}
 
 	return b.Bytes(), nil
-}
-
-// Construct a proper hostname (name:port) but taking into account standard ports
-// where the port specification should be omitted.
-func hostOf(name string, port int) string {
-	switch port {
-	case 80, 443:
-		return name
-	}
-	return fmt.Sprintf("%s:%d", name, port)
 }
 
 func addSecurityHeaders(c *config.Info, next http.Handler) http.Handler {
@@ -292,14 +89,13 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 
 	// setup routes
 	for _, r := range ctx.Routes {
-		host := hostOf(r.From, ctx.Port)
-		mb.ForHost(host).Handle("/",
-			addSecurityHeaders(ctx.Info, &disp{
-				ctx:   ctx,
-				prv:   p,
-				route: r,
-				host:  host,
-			}))
+		mb.ForHost(r.From).Handle("/",
+			addSecurityHeaders(ctx.Info,
+				&proxy.Backend{
+					Ctx:          ctx,
+					Route:        r,
+					AuthProvider: p,
+				}))
 	}
 
 	// load the template for the one piece of static content embedded in
@@ -312,7 +108,7 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 			func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/":
-					u, _ := userFrom(r, ctx.Key)
+					u, _ := user.DecodeFromRequest(r, ctx.Key)
 					w.Header().Set("Content-Type", "text/html;charset=utf-8")
 					if debugTmpl {
 						t, err := template.ParseFiles("index.html")
@@ -347,10 +143,10 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 				}
 
 				http.SetCookie(w, &http.Cookie{
-					Name:     userCookieKey,
+					Name:     user.CookieKey,
 					Value:    url.QueryEscape(v),
 					Path:     "/",
-					MaxAge:   authMaxAge,
+					MaxAge:   user.CookieMaxAge,
 					HttpOnly: true,
 					Secure:   ctx.HasCerts(),
 				})
@@ -380,7 +176,7 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 				}
 
 				http.SetCookie(w, &http.Cookie{
-					Name:   userCookieKey,
+					Name:   user.CookieKey,
 					Value:  "",
 					Path:   "/",
 					MaxAge: 0,
