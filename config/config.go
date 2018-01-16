@@ -3,6 +3,8 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -34,11 +36,18 @@ type RouteInfo struct {
 	// request path as per RFC 3986 Section 5.2.
 	To string
 
+	toURL *url.URL
+
 	// A list of groups which may access this route.  If groups are configured,
 	// users who are not a member of one of these groups will be denied access.
 	// A special group, `*`, may be specified which allows any authenticated
 	// user.
 	AllowedGroups []string `json:"allowed-groups"`
+}
+
+// ToURL ...
+func (r *RouteInfo) ToURL() *url.URL {
+	return r.toURL
 }
 
 // Info is a configuration object that is loaded directly from the json config file.
@@ -75,7 +84,7 @@ type Info struct {
 	Groups map[string][]string
 
 	// The mappings from hostname to backend server.
-	Routes []RouteInfo
+	Routes []*RouteInfo
 }
 
 // HasCerts is used to dermine if the instance is running over HTTP or HTTPS, this indicates whether
@@ -99,7 +108,18 @@ func (i *Info) Scheme() string {
 	return "http"
 }
 
-func validateAndInit(n *Info) error {
+// initRoute initializes a RouteInfo by parsing and validating its contents.
+func initRoute(r *RouteInfo) error {
+	toURL, err := url.Parse(r.To)
+	if err != nil {
+		return err
+	}
+
+	r.toURL = toURL
+	return nil
+}
+
+func initInfo(n *Info) error {
 	if n.Oauth.BaseURL != "" {
 		n.Oauth.BaseURL = strings.TrimRight(n.Oauth.BaseURL, "/")
 	}
@@ -110,6 +130,14 @@ func validateAndInit(n *Info) error {
 
 	if n.Oauth.ClientSecret == "" {
 		return errors.New("oauth.client-secret is required")
+	}
+
+	for _, route := range n.Routes {
+		if err := initRoute(route); err != nil {
+			return fmt.Errorf("Route %s has invalid To URL: %s",
+				route.From,
+				err)
+		}
 	}
 
 	return nil
@@ -129,5 +157,5 @@ func (i *Info) ReadFile(filename string) error {
 		return err
 	}
 
-	return validateAndInit(i)
+	return initInfo(i)
 }
