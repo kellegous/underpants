@@ -5,7 +5,10 @@ import "fmt"
 // Context is the configuration info plus all runtime parameters.
 type Context struct {
 	*Info
+
 	Port int
+
+	Key []byte
 }
 
 // Host is the normalized host URLs to the hub.

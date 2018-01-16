@@ -63,19 +63,14 @@ type disp struct {
 
 	prv auth.Provider
 
+	route *config.RouteInfo
+
 	// The host of the hub consistent with url.URL.Host, which is essentially the entire
 	// authority of the URL. Examples: hub.monetology.com or hub.monetology.com:4080
 	host string
 
 	// The route to the relevant backend
-	route *url.URL
-
-	// The signing key to use for authenticity
-	// TODO(knorton): Move to context.
-	key []byte
-
-	// The groups which may access this backend.
-	groups []string
+	url *url.URL
 }
 
 // Copy the HTTP headers from one collection to another.
@@ -138,7 +133,7 @@ func getAuthProvider(cfg *config.Info) (auth.Provider, error) {
 
 // serveHTTPProxy serves the response by proxying it to the backend represented by the disp object.
 func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
-	u, err := userFrom(r, d.key)
+	u, err := userFrom(r, d.ctx.Key)
 	if err != nil {
 		zap.L().Info("authentication required",
 			zap.String("host", r.Host),
@@ -150,7 +145,7 @@ func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 	}
 
 	if d.ctx.HasGroups() {
-		if !userMemberOf(d.ctx.Info, u, d.groups) {
+		if !userMemberOf(d.ctx.Info, u, d.route.AllowedGroups) {
 			zap.L().Info("access denied (not in group)",
 				zap.String("host", d.host),
 				zap.String("user", u.Email))
@@ -161,7 +156,7 @@ func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rebase, err := d.route.Parse(strings.TrimLeft(r.URL.RequestURI(), "/"))
+	rebase, err := d.url.Parse(strings.TrimLeft(r.URL.RequestURI(), "/"))
 	if err != nil {
 		panic(err)
 	}
@@ -211,7 +206,7 @@ func serveHTTPAuth(d *disp, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// verify the cookie
-	if _, err := decodeAndVerifyUser(c, d.key); err != nil {
+	if _, err := decodeAndVerifyUser(c, d.ctx.Key); err != nil {
 		// do not redirect out of here because this indicates a big
 		// problem and we're likely to get into a redir loop.
 		http.Error(w,
@@ -293,12 +288,6 @@ func addSecurityHeadersFunc(
 func setup(ctx *config.Context) (*mux.Serve, error) {
 	mb := mux.Create()
 
-	// Construct the HMAC signing key
-	key, err := newKey()
-	if err != nil {
-		return nil, err
-	}
-
 	p, err := getAuthProvider(ctx.Info)
 	if err != nil {
 		return nil, err
@@ -307,19 +296,19 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 	// setup routes
 	for _, r := range ctx.Routes {
 		host := hostOf(r.From, ctx.Port)
-		route, err := url.Parse(r.To)
+
+		uri, err := url.Parse(r.To)
 		if err != nil {
 			return nil, err
 		}
 
 		mb.ForHost(host).Handle("/",
 			addSecurityHeaders(ctx.Info, &disp{
-				ctx:    ctx,
-				prv:    p,
-				route:  route,
-				host:   host,
-				key:    key,
-				groups: r.AllowedGroups,
+				ctx:   ctx,
+				prv:   p,
+				route: &r,
+				url:   uri,
+				host:  host,
 			}))
 	}
 
@@ -333,7 +322,7 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 			func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/":
-					u, _ := userFrom(r, key)
+					u, _ := userFrom(r, ctx.Key)
 					w.Header().Set("Content-Type", "text/html;charset=utf-8")
 					if debugTmpl {
 						t, err := template.ParseFiles("index.html")
@@ -362,7 +351,7 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 
 				u.LastAuthenticated = time.Now()
 
-				v, err := u.Encode(key)
+				v, err := u.Encode(ctx.Key)
 				if err != nil {
 					panic(err)
 				}
@@ -502,7 +491,13 @@ func ListenAndServe(ctx *config.Context, m http.Handler) error {
 	return http.ListenAndServe(ctx.ListenAddr(), m)
 }
 
-func contextFrom(cfg *config.Info, port int) *config.Context {
+func contextFrom(cfg *config.Info, port int) (*config.Context, error) {
+	// Construct the HMAC signing key
+	key, err := newKey()
+	if err != nil {
+		return nil, err
+	}
+
 	if port == 0 {
 		if cfg.HasCerts() {
 			port = 443
@@ -514,7 +509,8 @@ func contextFrom(cfg *config.Info, port int) *config.Context {
 	return &config.Context{
 		Info: cfg,
 		Port: port,
-	}
+		Key:  key,
+	}, nil
 }
 
 func setupLogger() error {
@@ -546,7 +542,10 @@ func main() {
 		panic(err)
 	}
 
-	ctx := contextFrom(&cfg, *flagPort)
+	ctx, err := contextFrom(&cfg, *flagPort)
+	if err != nil {
+		panic(err)
+	}
 
 	m, err := setup(ctx)
 	if err != nil {
