@@ -1,4 +1,4 @@
-package google
+package okta
 
 import (
 	"context"
@@ -14,27 +14,28 @@ import (
 	"github.com/kellegous/underpants/user"
 
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 )
 
-// Name ...
-const Name = "google"
+// Name is the name for this provider as used in config.Info.
+const Name = "okta"
 
-const profileURL = "https://www.googleapis.com/oauth2/v1/userinfo?alt=json"
+// Provider is the auth.Provider for Okta oauth
+var Provider = &provider{}
 
 type provider struct{}
-
-// Provider is the auth.Provider for Google OAuth
-var Provider auth.Provider = &provider{}
 
 func configFor(ctx *config.Context) *oauth2.Config {
 	return &oauth2.Config{
 		ClientID:     ctx.Oauth.ClientID,
 		ClientSecret: ctx.Oauth.ClientSecret,
-		Endpoint:     google.Endpoint,
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  fmt.Sprintf("%s/oauth2/v1/authorize", ctx.Oauth.BaseURL),
+			TokenURL: fmt.Sprintf("%s/oauth2/v1/token", ctx.Oauth.BaseURL),
+		},
 		Scopes: []string{
-			"https://www.googleapis.com/auth/userinfo.profile",
-			"https://www.googleapis.com/auth/userinfo.email",
+			"openid",
+			"profile",
+			"email",
 		},
 		RedirectURL: fmt.Sprintf("%s://%s%s",
 			ctx.Scheme(),
@@ -43,17 +44,17 @@ func configFor(ctx *config.Context) *oauth2.Config {
 	}
 }
 
-func fetchUser(cfg *oauth2.Config, tok *oauth2.Token) (*user.Info, error) {
-	res, err := cfg.Client(context.Background(), tok).Get(profileURL)
+func fetchUser(ctx *config.Context, c *http.Client) (*user.Info, error) {
+	res, err := c.Get(fmt.Sprintf("%s/oauth2/v1/userinfo",
+		strings.TrimRight(ctx.Oauth.BaseURL, "/")))
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
 
 	var u struct {
-		Name    string `json:"name"`
-		Email   string `json:"email"`
-		Picture string `json:"picture"`
+		Name  string `json:"name"`
+		Email string `json:"email"`
 	}
 
 	if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
@@ -61,22 +62,14 @@ func fetchUser(cfg *oauth2.Config, tok *oauth2.Token) (*user.Info, error) {
 	}
 
 	return &user.Info{
-		Name:    u.Name,
-		Email:   u.Email,
-		Picture: u.Picture,
+		Email: u.Email,
+		Name:  u.Name,
 	}, nil
 }
 
 func (p *provider) GetAuthURL(ctx *config.Context, r *http.Request) string {
-	u := configFor(ctx).AuthCodeURL(
+	return configFor(ctx).AuthCodeURL(
 		auth.GetCurrentURL(ctx, r).String())
-
-	// If the config is restricting by domain, then add that to the auth url.
-	if d := ctx.Oauth.Domain; d != "" {
-		u += fmt.Sprintf("&hd=%s", url.QueryEscape(d))
-	}
-
-	return u
 }
 
 func (p *provider) Authenticate(ctx *config.Context, r *http.Request) (*user.Info, *url.URL, error) {
@@ -102,15 +95,9 @@ func (p *provider) Authenticate(ctx *config.Context, r *http.Request) (*user.Inf
 		return nil, nil, err
 	}
 
-	u, err := fetchUser(cfg, tok)
+	u, err := fetchUser(ctx, cfg.Client(context.Background(), tok))
 	if err != nil {
 		return nil, nil, err
-	}
-
-	if !strings.HasSuffix(u.Email, "@"+ctx.Oauth.Domain) {
-		return nil, nil, fmt.Errorf("user %s is not in domain %s",
-			u.Email,
-			ctx.Oauth.Domain)
 	}
 
 	return u, ret, nil
