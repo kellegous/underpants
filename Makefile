@@ -1,3 +1,6 @@
+$(GOPATH)/bin/underpants: $(shell find . -type f -not -path "./vendor/*" -not -path "./.git/*")
+	go install github.com/kellegous/underpants
+
 test:
 	go test github.com/kellegous/underpants/auth/... \
 		github.com/kellegous/underpants/config \

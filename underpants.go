@@ -58,7 +58,6 @@ func decodeAndVerifyUser(val string, key []byte) (*user.Info, error) {
 // Represents a route to a backend. This is fully immutable after construction and will
 // be shared among http serving go routines.
 type disp struct {
-	// A copy of the original configuration
 	ctx *config.Context
 
 	prv auth.Provider
@@ -68,9 +67,6 @@ type disp struct {
 	// The host of the hub consistent with url.URL.Host, which is essentially the entire
 	// authority of the URL. Examples: hub.monetology.com or hub.monetology.com:4080
 	host string
-
-	// The route to the relevant backend
-	url *url.URL
 }
 
 // Copy the HTTP headers from one collection to another.
@@ -156,7 +152,8 @@ func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rebase, err := d.url.Parse(strings.TrimLeft(r.URL.RequestURI(), "/"))
+	rebase, err := d.route.ToURL().Parse(
+		strings.TrimLeft(r.URL.RequestURI(), "/"))
 	if err != nil {
 		panic(err)
 	}
@@ -296,18 +293,11 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 	// setup routes
 	for _, r := range ctx.Routes {
 		host := hostOf(r.From, ctx.Port)
-
-		uri, err := url.Parse(r.To)
-		if err != nil {
-			return nil, err
-		}
-
 		mb.ForHost(host).Handle("/",
 			addSecurityHeaders(ctx.Info, &disp{
 				ctx:   ctx,
 				prv:   p,
-				route: &r,
-				url:   uri,
+				route: r,
 				host:  host,
 			}))
 	}
