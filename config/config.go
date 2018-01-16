@@ -8,11 +8,16 @@ import (
 // OAuthInfo is the part of the configuration info that contains information
 // about the oauth provider.
 type OAuthInfo struct {
+	Provider string `json:"provider"`
+
 	ClientID     string `json:"client-id"`
 	ClientSecret string `json:"client-secret"`
 
 	// Google provider properties
 	Domain string `json:"domain"`
+
+	// Okta provider properties
+	BaseURL string `json:"base-url"`
 }
 
 // Info is a configuration object that is loaded directly from the json config file.

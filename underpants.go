@@ -22,6 +22,7 @@ import (
 
 	"github.com/kellegous/underpants/auth"
 	"github.com/kellegous/underpants/auth/google"
+	"github.com/kellegous/underpants/auth/okta"
 	"github.com/kellegous/underpants/config"
 	"github.com/kellegous/underpants/mux"
 	"github.com/kellegous/underpants/user"
@@ -30,7 +31,6 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
-// TODO(knorton): allow websockets to pass.
 const (
 	// the name of the auth cookie
 	userCookieKey = "u"
@@ -60,6 +60,8 @@ func decodeAndVerifyUser(val string, key []byte) (*user.Info, error) {
 type disp struct {
 	// A copy of the original configuration
 	ctx *config.Context
+
+	prv auth.Provider
 
 	// The host of the hub consistent with url.URL.Host, which is essentially the entire
 	// authority of the URL. Examples: hub.monetology.com or hub.monetology.com:4080
@@ -122,9 +124,16 @@ func userMemberOf(c *config.Info, u *user.Info, groups []string) bool {
 	return false
 }
 
-// TODO(knorton): Expand this.
-func getAuthProvider(cfg *config.Info) auth.Provider {
-	return google.Provider
+// getAuthProvider returns the auth.Provider that was configured in the config info.
+func getAuthProvider(cfg *config.Info) (auth.Provider, error) {
+	switch cfg.Oauth.Provider {
+	case google.Name, "":
+		return google.Provider, nil
+	case okta.Name:
+		return okta.Provider, nil
+	}
+
+	return nil, fmt.Errorf("invalid oauth provider: %s", cfg.Oauth.Provider)
 }
 
 // serveHTTPProxy serves the response by proxying it to the backend represented by the disp object.
@@ -135,7 +144,7 @@ func serveHTTPProxy(d *disp, w http.ResponseWriter, r *http.Request) {
 			zap.String("host", r.Host),
 			zap.String("uri", r.RequestURI))
 		http.Redirect(w, r,
-			getAuthProvider(d.ctx.Info).GetAuthURL(d.ctx, r),
+			d.prv.GetAuthURL(d.ctx, r),
 			http.StatusFound)
 		return
 	}
@@ -290,6 +299,11 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 		return nil, err
 	}
 
+	p, err := getAuthProvider(ctx.Info)
+	if err != nil {
+		return nil, err
+	}
+
 	// setup routes
 	for _, r := range ctx.Routes {
 		host := hostOf(r.From, ctx.Port)
@@ -301,6 +315,7 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 		mb.ForHost(host).Handle("/",
 			addSecurityHeaders(ctx.Info, &disp{
 				ctx:    ctx,
+				prv:    p,
 				route:  route,
 				host:   host,
 				key:    key,
@@ -337,7 +352,7 @@ func setup(ctx *config.Context) (*mux.Serve, error) {
 	mb.ForAnyHost().Handle(auth.BaseURI,
 		addSecurityHeadersFunc(ctx.Info,
 			func(w http.ResponseWriter, r *http.Request) {
-				u, back, err := getAuthProvider(ctx.Info).Authenticate(ctx, r)
+				u, back, err := p.Authenticate(ctx, r)
 				if err != nil {
 					http.Error(w,
 						http.StatusText(http.StatusForbidden),
