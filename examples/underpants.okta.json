@@ -1,0 +1,20 @@
+{
+  "host" : "underpants.company.com",
+  "oauth" : {
+    "privider"      : "okta",
+    "client-id"     : "oauth-client-id",
+    "client-secret" : "oauth-client-secret",
+    "base-url"      : "https://dev-8675309.oktapreview.com/"
+  },
+  "use-strict-security-headers": true,
+  "routes" : [
+    {
+      "from" : "foo.company.com",
+      "to"   : "http://localhost:8080/foo/"
+    },
+    {
+      "from" : "bar.company.com",
+      "to"   : "http://localhost:8080/bar/"
+    }
+  ]
+}
