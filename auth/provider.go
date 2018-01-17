@@ -16,6 +16,7 @@ const (
 
 // Provider ...
 type Provider interface {
+	Validate(cfg *config.Info) error
 	GetAuthURL(ctx *config.Context, r *http.Request) string
 	Authenticate(ctx *config.Context, r *http.Request) (*user.Info, *url.URL, error)
 }

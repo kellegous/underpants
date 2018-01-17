@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -30,14 +29,22 @@ import (
 
 // getAuthProvider returns the auth.Provider that was configured in the config info.
 func getAuthProvider(cfg *config.Info) (auth.Provider, error) {
+	var prv auth.Provider
+
 	switch cfg.Oauth.Provider {
 	case google.Name, "":
-		return google.Provider, nil
+		prv = google.Provider
 	case okta.Name:
-		return okta.Provider, nil
+		prv = okta.Provider
+	default:
+		return nil, fmt.Errorf("invalid oauth provider: %s", cfg.Oauth.Provider)
 	}
 
-	return nil, fmt.Errorf("invalid oauth provider: %s", cfg.Oauth.Provider)
+	if err := prv.Validate(cfg); err != nil {
+		return nil, err
+	}
+
+	return prv, nil
 }
 
 func getAuthProviderName(cfg *config.Info) string {
@@ -64,13 +71,8 @@ func newKey() ([]byte, error) {
 }
 
 // buildMux creates a mux for serving all http routes.
-func buildMux(ctx *config.Context) (*mux.Serve, error) {
+func buildMux(ctx *config.Context, p auth.Provider) (*mux.Serve, error) {
 	mb := mux.Create()
-
-	p, err := getAuthProvider(ctx.Info)
-	if err != nil {
-		return nil, err
-	}
 
 	// setup routes for proxy backends
 	proxy.Setup(ctx, p, mb)
@@ -203,17 +205,27 @@ func main() {
 	flag.Parse()
 
 	if err := setupLogger(); err != nil {
-		log.Panic(err)
+		panic(err)
 	}
 
 	var cfg config.Info
 	if err := cfg.ReadFile(*flagConf); err != nil {
-		panic(err)
+		zap.L().Fatal("unable to load config",
+			zap.String("filename", *flagConf),
+			zap.Error(err))
+	}
+
+	p, err := getAuthProvider(&cfg)
+	if err != nil {
+		zap.L().Fatal("invalid provider config",
+			zap.String("filename", *flagConf),
+			zap.Error(err))
 	}
 
 	ctx, err := contextFrom(&cfg, *flagPort)
 	if err != nil {
-		panic(err)
+		zap.L().Fatal("unable to build context",
+			zap.Error(err))
 	}
 
 	zap.L().Info("starting",
@@ -221,12 +233,14 @@ func main() {
 		zap.String("conf", *flagConf),
 		zap.String("provider", getAuthProviderName(ctx.Info)))
 
-	m, err := buildMux(ctx)
+	m, err := buildMux(ctx, p)
 	if err != nil {
-		panic(err)
+		zap.L().Fatal("unable to build mux",
+			zap.Error(err))
 	}
 
 	if err := ListenAndServe(ctx, m); err != nil {
-		panic(err)
+		zap.L().Fatal("unable to listen and serve",
+			zap.Error(err))
 	}
 }
