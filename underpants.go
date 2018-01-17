@@ -183,11 +183,7 @@ func contextFrom(cfg *config.Info, port int) (*config.Context, error) {
 		}
 	}
 
-	return &config.Context{
-		Info: cfg,
-		Port: port,
-		Key:  key,
-	}, nil
+	return config.BuildContext(cfg, port, key), nil
 }
 
 func setupLogger() error {

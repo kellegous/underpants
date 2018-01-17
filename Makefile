@@ -7,3 +7,6 @@ test:
 		github.com/kellegous/underpants/mux \
 		github.com/kellegous/underpants/user \
 		github.com/kellegous/underpants/util
+
+clean:
+	rm -f $(GOPATH)/bin/underpants
