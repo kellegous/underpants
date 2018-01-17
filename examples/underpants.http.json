@@ -1,6 +1,7 @@
 {
   "host" : "underpants.company.com",
   "oauth" : {
+    "privider"      : "google",
     "domain"        : "company.com",
     "client-id"     : "oauth-client-id",
     "client-secret" : "oauth-client-secret"

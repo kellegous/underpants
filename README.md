@@ -1,6 +1,6 @@
 # Underpants
 
-## A reverse HTTP proxy that authenticates requests through Google OAuth.
+## A reverse HTTP proxy that authenticates requests through OAuth2.
 
 Suppose you are a Google Apps customer and suppose you want to restrict access to some web servers to just the folks in your organization. Like, for instance, if you're building your internal apps on AWS. Pain in the ass, right? So put underpants in between the world and your backends and you can use your Google credentials to get in.
 
@@ -17,6 +17,7 @@ Your underpants are configured through a silly little JSON file. Here's an examp
 {
   "host" : "underpants.company.com",
   "oauth" : {
+    "provider"      : "google",
     "domain"        : "company.com",
     "client-id"     : "oauth-client-id",
     "client-secret" : "oauth-client-secret"
@@ -37,11 +38,21 @@ Your underpants are configured through a silly little JSON file. Here's an examp
 }
 </pre>
 
+## Available Providers
+ 1. [Google](examples/underpants.http.json)
+ 2. [Okta](examples/underpants.okta.json)
+
+### Google
+You can get your oauth-client-id and oauth-client-secret by creating a project on [Google's API Console](https://code.google.com/apis/console). You will use that for your `client-id` and `client-secret`. Generally, you will also want to use the `domain` configuration to limit authentication to a particular domain.
+
+### Okta
+For testing, you can create a [developer account](https://developer.okta.com/). Configuration of okta requires `client-id`, `client-secret` and `base-url` which will point to the domain for your okta instance (i.e. https://example.okta.com).
+
+## Additional Details
+
 The `certs` section is optional and its absence will cause your underpants proxy to operate on pure HTTP. The key file may be encrypted so
 long as it is in encrypted PEM format with proper `Proc-Type` and `Dek-Info` headers. If you do not know what that means, just use openssl
 and that is what you will end up with.
-
-You can get your oauth-client-id and oauth-client-secret by creating a project on [Google's API Console](https://code.google.com/apis/console).
 
 If your configuration can stomach it, enable `use-strict-security-headers` to
 get some extra peace of mind.  This will block clickjacking, disable downstream
