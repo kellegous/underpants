@@ -120,3 +120,15 @@ func DecodeFromRequest(r *http.Request, key []byte) (*Info, error) {
 
 	return u, nil
 }
+
+// CreateCookie creates a new http.Cookie for the user cookie.
+func CreateCookie(data string, secure bool) *http.Cookie {
+	return &http.Cookie{
+		Name:     CookieKey,
+		Value:    url.QueryEscape(data),
+		Path:     "/",
+		MaxAge:   CookieMaxAge,
+		HttpOnly: true,
+		Secure:   secure,
+	}
+}
