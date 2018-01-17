@@ -66,17 +66,9 @@ func (b *Backend) serveHTTPAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     user.CookieKey,
-		Value:    url.QueryEscape(c),
-		Path:     "/",
-		MaxAge:   user.CookieMaxAge,
-		HttpOnly: true,
-		Secure:   b.Ctx.HasCerts(),
-	})
+	http.SetCookie(w, user.CreateCookie(c, b.Ctx.HasCerts()))
 
-	// TODO(knorton): validate the url string because it could totally
-	// be used to fuck with the http message.
+	// Redirect validates the redirect path.
 	http.Redirect(w, r, p, http.StatusFound)
 }
 
