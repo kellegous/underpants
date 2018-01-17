@@ -22,22 +22,6 @@ type Backend struct {
 	AuthProvider auth.Provider
 }
 
-func userMemberOf(c *config.Info, u *user.Info, groups []string) bool {
-	for _, group := range groups {
-		if group == "*" {
-			return true
-		}
-
-		for _, allowedUser := range c.Groups[group] {
-			if u.Email == allowedUser {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
 // Copy the HTTP headers from one collection to another.
 func copyHeaders(dst, src http.Header) {
 	for key, vals := range src {
@@ -84,16 +68,14 @@ func (b *Backend) serveHTTPProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if b.Ctx.HasGroups() {
-		if !userMemberOf(b.Ctx.Info, u, b.Route.AllowedGroups) {
-			zap.L().Info("access denied (not in group)",
-				zap.String("from", b.Route.From),
-				zap.String("user", u.Email))
-			http.Error(w,
-				"Forbidden: you are not a member of a group authorized to view this site.",
-				http.StatusForbidden)
-			return
-		}
+	if !b.Ctx.UserMemberOfAny(u.Email, b.Route.AllowedGroups) {
+		zap.L().Info("access denied (not in group)",
+			zap.String("from", b.Route.From),
+			zap.String("user", u.Email))
+		http.Error(w,
+			"Forbidden: you are not a member of a group authorized to view this site.",
+			http.StatusForbidden)
+		return
 	}
 
 	rebase, err := b.Route.ToURL().Parse(
