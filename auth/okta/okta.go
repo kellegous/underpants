@@ -67,6 +67,13 @@ func fetchUser(ctx *config.Context, c *http.Client) (*user.Info, error) {
 	}, nil
 }
 
+func (p *provider) Validate(cfg *config.Info) error {
+	if cfg.Oauth.BaseURL == "" {
+		return errors.New("the okta provider requires a base-url")
+	}
+	return nil
+}
+
 func (p *provider) GetAuthURL(ctx *config.Context, r *http.Request) string {
 	return configFor(ctx).AuthCodeURL(
 		auth.GetCurrentURL(ctx, r).String())

@@ -67,6 +67,10 @@ func fetchUser(cfg *oauth2.Config, tok *oauth2.Token) (*user.Info, error) {
 	}, nil
 }
 
+func (p *provider) Validate(cfg *config.Info) error {
+	return nil
+}
+
 func (p *provider) GetAuthURL(ctx *config.Context, r *http.Request) string {
 	u := configFor(ctx).AuthCodeURL(
 		auth.GetCurrentURL(ctx, r).String())
