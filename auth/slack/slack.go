@@ -22,17 +22,25 @@ const Name = "slack"
 // Provider is the auth.Provider for Slack
 var Provider = &provider{}
 
-type provider struct{}
+var defaultScopes = []string{
+	"bot",
+	"users.profile:read",
+}
+
+type provider struct {
+	scopes []string
+}
 
 func configFor(ctx *config.Context) *oauth2.Config {
+	scopes := defaultScopes
+	if len(ctx.Scopes()) > 0 {
+		scopes = ctx.Scopes()
+	}
 	return &oauth2.Config{
 		ClientID:     ctx.Oauth.ClientID,
 		ClientSecret: ctx.Oauth.ClientSecret,
 		Endpoint:     slackoauth.Endpoint,
-		Scopes: []string{
-			"bot",
-			"users.profile:read",
-		},
+		Scopes:       scopes,
 		RedirectURL: fmt.Sprintf("%s://%s%s",
 			ctx.Scheme(),
 			ctx.Host(),
