@@ -18,6 +18,7 @@ import (
 	"github.com/kellegous/underpants/auth"
 	"github.com/kellegous/underpants/auth/google"
 	"github.com/kellegous/underpants/auth/okta"
+	"github.com/kellegous/underpants/auth/slack"
 	"github.com/kellegous/underpants/config"
 	"github.com/kellegous/underpants/hub"
 	"github.com/kellegous/underpants/mux"
@@ -36,6 +37,8 @@ func getAuthProvider(cfg *config.Info) (auth.Provider, error) {
 		prv = google.Provider
 	case okta.Name:
 		prv = okta.Provider
+	case slack.Name:
+		prv = slack.Provider
 	default:
 		return nil, fmt.Errorf("invalid oauth provider: %s", cfg.Oauth.Provider)
 	}
@@ -53,6 +56,8 @@ func getAuthProviderName(cfg *config.Info) string {
 		return google.Name
 	case okta.Name:
 		return okta.Name
+	case slack.Name:
+		return slack.Name
 	}
 	return "unknown"
 }
