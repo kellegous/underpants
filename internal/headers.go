@@ -3,7 +3,7 @@ package internal
 import (
 	"net/http"
 
-	"github.com/kellegous/underpants/config"
+	"github.com/playdots/underpants/config"
 )
 
 // AddSecurityHeaders ...

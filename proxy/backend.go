@@ -6,9 +6,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/kellegous/underpants/auth"
-	"github.com/kellegous/underpants/config"
-	"github.com/kellegous/underpants/user"
+	"github.com/playdots/underpants/auth"
+	"github.com/playdots/underpants/config"
+	"github.com/playdots/underpants/user"
 
 	"go.uber.org/zap"
 )
