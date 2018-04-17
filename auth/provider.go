@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/kellegous/underpants/config"
-	"github.com/kellegous/underpants/user"
+	"github.com/playdots/underpants/config"
+	"github.com/playdots/underpants/user"
 )
 
 const (

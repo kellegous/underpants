@@ -7,11 +7,11 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/kellegous/underpants/auth"
-	"github.com/kellegous/underpants/config"
-	"github.com/kellegous/underpants/internal"
-	"github.com/kellegous/underpants/mux"
-	"github.com/kellegous/underpants/user"
+	"github.com/playdots/underpants/auth"
+	"github.com/playdots/underpants/config"
+	"github.com/playdots/underpants/internal"
+	"github.com/playdots/underpants/mux"
+	"github.com/playdots/underpants/user"
 )
 
 // Setup ...

@@ -1,10 +1,10 @@
 package proxy
 
 import (
-	"github.com/kellegous/underpants/auth"
-	"github.com/kellegous/underpants/config"
-	"github.com/kellegous/underpants/internal"
-	"github.com/kellegous/underpants/mux"
+	"github.com/playdots/underpants/auth"
+	"github.com/playdots/underpants/config"
+	"github.com/playdots/underpants/internal"
+	"github.com/playdots/underpants/mux"
 )
 
 // Setup adds the proxy handlers to the mux.Builder.

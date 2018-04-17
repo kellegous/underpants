@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kellegous/underpants/config"
+	"github.com/playdots/underpants/config"
 )
 
 func TestAuthURLWithoutDomain(t *testing.T) {
