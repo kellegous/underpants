@@ -14,8 +14,9 @@ import (
 type OAuthInfo struct {
 	Provider string `json:"provider"`
 
-	ClientID     string `json:"client-id"`
-	ClientSecret string `json:"client-secret"`
+	ClientID     string   `json:"client-id"`
+	ClientSecret string   `json:"client-secret"`
+	Scopes       []string `json:"scopes"`
 
 	// Google provider properties
 	Domain string `json:"domain"`

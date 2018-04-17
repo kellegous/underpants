@@ -22,6 +22,11 @@ type membership struct {
 	Email, Group string
 }
 
+// Scopes returns the scopes if any
+func (c *Context) Scopes() []string {
+	return c.Info.Oauth.Scopes
+}
+
 // Host is the normalized host URLs to the hub.
 func (c *Context) Host() string {
 	switch c.Port {
