@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kellegous/underpants/config"
+	"github.com/playdots/underpants/config"
 )
 
 func TestAuthURLWithoutDomain(t *testing.T) {
@@ -17,7 +17,7 @@ func TestAuthURLWithoutDomain(t *testing.T) {
 				ClientID:     "client_id",
 				ClientSecret: "client_secret",
 			},
-			Host: "foo.com",
+			Host: "foo.com:9090",
 		},
 		Port: 9090,
 	}

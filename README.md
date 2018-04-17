@@ -1,3 +1,15 @@
+# Notes
+
+We are forking Underpants from https://github.com/kellegous/underpants, and submitted a PR request
+https://github.com/kellegous/underpants/pull/32 to incorporate changes made to deal with setting
+up Underpants behind a proxy.
+
+However we are still waiting from response from the author and will temporarily rename the app
+depedencies, so we can streamline our development and deploy process. Once the PR above is 
+approved, we will be using the original repo instead.
+
+---
+
 # Underpants
 
 ## A reverse HTTP proxy that authenticates requests through OAuth2.
