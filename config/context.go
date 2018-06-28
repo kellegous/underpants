@@ -15,6 +15,9 @@ type Context struct {
 
 	// groupIdx is an index of group membership that makes permission checking efficient.
 	groupIdx map[membership]bool
+
+	// domainGroupIdx is an index of group domain membership that makes permission checking efficient.
+	domainGroupIdx map[membership]bool
 }
 
 // membership is used as a key in the groupIdx of the Context.
@@ -40,18 +43,26 @@ func (c *Context) ListenAddr() string {
 
 // BuildContext constructs a new context.
 func BuildContext(cfg *Info, port int, key []byte) *Context {
-	idx := map[membership]bool{}
+	groupIdx := map[membership]bool{}
 	for name, emails := range cfg.Groups {
 		for _, email := range emails {
-			idx[membership{email, name}] = true
+			groupIdx[membership{email, name}] = true
+		}
+	}
+
+	domainGroupIdx := map[membership]bool{}
+	for name, domains := range cfg.DomainGroups {
+		for _, domain := range domains {
+			domainGroupIdx[membership{domain, name}] = true
 		}
 	}
 
 	return &Context{
-		Info:     cfg,
-		Port:     port,
-		Key:      key,
-		groupIdx: idx,
+		Info:      		cfg,
+		Port:      		port,
+		Key:       		key,
+		groupIdx:  		groupIdx,
+		domainGroupIdx:		domainGroupIdx,
 	}
 }
 
@@ -68,6 +79,26 @@ func (c *Context) UserMemberOfAny(email string, groups []string) bool {
 		}
 
 		if c.groupIdx[membership{email, group}] {
+			return true
+		}
+	}
+
+	return false
+}
+
+// DomainMemberOfAny determines if an email domain belongs to any domain groups.
+func (c *Context) DomainMemberOfAny(domain string, domainGroups []string) bool {
+	if !c.HasDomainGroups() {
+		return true
+	}
+
+	for _, domainGroup := range domainGroups {
+		// The semantics of * are as if there is an anonymous group that covers all users.
+		if domainGroup == "*" {
+			return true
+		}
+
+		if c.domainGroupIdx[membership{domain, domainGroup}] {
 			return true
 		}
 	}

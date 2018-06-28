@@ -43,6 +43,12 @@ type RouteInfo struct {
 	// A special group, `*`, may be specified which allows any authenticated
 	// user.
 	AllowedGroups []string `json:"allowed-groups"`
+
+	// A list of domain groups which may access this route.  If domain-groups are configured,
+	// users emails who are not a member of one of these domain-groups will be denied access.
+	// A special group, `*`, may be specified which allows any authenticated
+	// user.
+	AllowedDomainGroups []string `json:"allowed-domain-groups"`
 }
 
 // ToURL ...
@@ -88,6 +94,11 @@ type Info struct {
 	// a route is to deny all users not in a group on its allowed-groups list.
 	Groups map[string][]string
 
+	// A mapping of domain group names to lists of domains that are members
+	// of that group.  If this section is present, then the default behaviour for
+	// a route is to deny all email domains not present in that group.
+	DomainGroups map[string][]string `json:"domain-groups"`
+
 	// The mappings from hostname to backend server.
 	Routes []*RouteInfo
 }
@@ -102,6 +113,11 @@ func (i *Info) HasCerts() bool {
 // control lists.
 func (i *Info) HasGroups() bool {
 	return len(i.Groups) > 0
+}
+
+// HasDomainGroups is used to determine if the instance is configured for multiple domains.
+func (i *Info) HasDomainGroups() bool {
+	return len(i.DomainGroups) > 0
 }
 
 // Scheme is a convience method for getting the relevant scheme based on whether certificates were

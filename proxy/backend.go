@@ -78,6 +78,19 @@ func (b *Backend) serveHTTPProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	email := strings.Split(u.Email, "@")
+	domain := email[len(email)-1]
+
+	if !b.Ctx.DomainMemberOfAny(domain, b.Route.AllowedDomainGroups) {
+		zap.L().Info("access denied (domain not in group)",
+			zap.String("from", b.Route.From),
+			zap.String("user", u.Email))
+		http.Error(w,
+			"Forbidden: your domain is not a member of the group authorized to view this site.",
+			http.StatusForbidden)
+		return
+	}
+
 	rebase, err := b.Route.ToURL().Parse(
 		strings.TrimLeft(r.URL.RequestURI(), "/"))
 	if err != nil {

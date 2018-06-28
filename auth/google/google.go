@@ -76,7 +76,9 @@ func (p *provider) GetAuthURL(ctx *config.Context, r *http.Request) string {
 		auth.GetCurrentURL(ctx, r).String())
 
 	// If the config is restricting by domain, then add that to the auth url.
-	if d := ctx.Oauth.Domain; d != "" {
+	if ctx.HasDomainGroups() {
+		u += "&hd=*"
+	} else if d := ctx.Oauth.Domain; d != "" {
 		u += fmt.Sprintf("&hd=%s", url.QueryEscape(d))
 	}
 
@@ -111,10 +113,14 @@ func (p *provider) Authenticate(ctx *config.Context, r *http.Request) (*user.Inf
 		return nil, nil, err
 	}
 
-	if !strings.HasSuffix(u.Email, "@"+ctx.Oauth.Domain) {
-		return nil, nil, fmt.Errorf("user %s is not in domain %s",
-			u.Email,
-			ctx.Oauth.Domain)
+	// Only check domain if there are no domain groups, otherwise this will be checked in
+	// the proxy/backend.go serveHTTPProxy method
+	if !ctx.HasDomainGroups() {
+		if !strings.HasSuffix(u.Email, "@"+ctx.Oauth.Domain) {
+			return nil, nil, fmt.Errorf("user %s is not in domain %s",
+				u.Email,
+				ctx.Oauth.Domain)
+		}
 	}
 
 	return u, ret, nil
