@@ -58,11 +58,11 @@ func BuildContext(cfg *Info, port int, key []byte) *Context {
 	}
 
 	return &Context{
-		Info:      		cfg,
-		Port:      		port,
-		Key:       		key,
-		groupIdx:  		groupIdx,
-		domainGroupIdx:		domainGroupIdx,
+		Info:           cfg,
+		Port:           port,
+		Key:            key,
+		groupIdx:       groupIdx,
+		domainGroupIdx: domainGroupIdx,
 	}
 }
 
@@ -94,7 +94,7 @@ func (c *Context) DomainMemberOfAny(domain string, domainGroups []string) bool {
 
 	for _, domainGroup := range domainGroups {
 		// The semantics of * are as if there is an anonymous group that covers all
-    // domains.
+		// domains.
 		if domainGroup == "*" {
 			return true
 		}

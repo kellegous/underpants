@@ -81,13 +81,13 @@ func (b *Backend) serveHTTPProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Validate properly formatted email address
 	if _, err := mail.ParseAddress(u.Email); err != nil {
-    http.Error(w,
-      "Forbidden: your email address is invalid.",
-      http.StatusForbidden)
-    return
-  }
+		http.Error(w,
+			"Forbidden: your email address is invalid.",
+			http.StatusForbidden)
+		return
+	}
 
-  email := strings.Split(u.Email, "@")
+	email := strings.Split(u.Email, "@")
 	domain := email[len(email)-1]
 
 	if !b.Ctx.DomainMemberOfAny(domain, b.Route.AllowedDomainGroups) {
