@@ -67,6 +67,20 @@ func fetchUser(cfg *oauth2.Config, tok *oauth2.Token) (*user.Info, error) {
 	}, nil
 }
 
+func ValidateDomain(ctx *config.Context, u *user.Info) (*user.Info, error) {
+	// Only validate domain if there are no domain groups, otherwise domain groups
+	// are checked in the proxy/backend.go serveHTTPProxy method
+	if !ctx.HasDomainGroups() {
+		if !strings.HasSuffix(u.Email, "@"+ctx.Oauth.Domain) {
+			return nil, fmt.Errorf("user %s is not in domain %s",
+				u.Email,
+				ctx.Oauth.Domain)
+		}
+	}
+
+	return u, nil
+}
+
 func (p *provider) Validate(cfg *config.Info) error {
 	return nil
 }
@@ -113,14 +127,8 @@ func (p *provider) Authenticate(ctx *config.Context, r *http.Request) (*user.Inf
 		return nil, nil, err
 	}
 
-	// Only check domain if there are no domain groups, otherwise this will be checked in
-	// the proxy/backend.go serveHTTPProxy method
-	if !ctx.HasDomainGroups() {
-		if !strings.HasSuffix(u.Email, "@"+ctx.Oauth.Domain) {
-			return nil, nil, fmt.Errorf("user %s is not in domain %s",
-				u.Email,
-				ctx.Oauth.Domain)
-		}
+	if _, err := ValidateDomain(ctx, u); err != nil {
+		return nil, nil, err
 	}
 
 	return u, ret, nil
