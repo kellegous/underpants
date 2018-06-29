@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/playdots/underpants/config"
+	"github.com/playdots/underpants/user"
 )
 
 func TestAuthURLWithoutDomain(t *testing.T) {
@@ -100,5 +101,64 @@ func TestAuthURLWith(t *testing.T) {
 			param,
 			exp,
 			vals[param])
+	}
+}
+
+func TestValidateDomain(t *testing.T) {
+	ctx := &config.Context{
+		Info: &config.Info{
+			Oauth: config.OAuthInfo{
+				ClientID:     "client_id",
+				ClientSecret: "client_secret",
+				Domain:       "valid-domain.com",
+			},
+		},
+	}
+
+	user1 := &user.Info{
+		Name:    "name",
+		Email:   "user@valid-domain.com",
+	}
+
+	user2 := &user.Info{
+		Name:    "name",
+		Email:   "user@invalid-domain.com",
+	}
+
+	if _, err := ValidateDomain(ctx, user1); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ValidateDomain(ctx, user2); err == nil {
+		t.Fatalf("expected %s to fail validation", user2.Email)
+	}
+}
+
+func TestValidateDomainNotConfigured(t *testing.T) {
+	ctx := &config.Context{
+		Info: &config.Info{
+			Oauth: config.OAuthInfo{
+				ClientID:     "client_id",
+				ClientSecret: "client_secret",
+			},
+		},
+	}
+
+	user1 := &user.Info{
+		Name:    "name",
+		Email:   "user@valid-domain.com",
+	}
+
+	user2 := &user.Info{
+		Name:    "name",
+		Email:   "user@shady-domain.com",
+	}
+
+	if _, err := ValidateDomain(ctx, user1); err == nil {
+		t.Fatalf("expected %s to fail validation", user1.Email)
+	}
+
+	if _, err := ValidateDomain(ctx, user2); err == nil {
+		t.Fatalf("expected %s to fail validation", user2.Email)
 	}
 }
