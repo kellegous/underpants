@@ -3,6 +3,7 @@ package proxy
 import (
 	"io"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"strings"
 
@@ -78,7 +79,15 @@ func (b *Backend) serveHTTPProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email := strings.Split(u.Email, "@")
+	// Validate properly formatted email address
+	if _, err := mail.ParseAddress(u.Email); err != nil {
+    http.Error(w,
+      "Forbidden: your email address is invalid.",
+      http.StatusForbidden)
+    return
+  }
+
+  email := strings.Split(u.Email, "@")
 	domain := email[len(email)-1]
 
 	if !b.Ctx.DomainMemberOfAny(domain, b.Route.AllowedDomainGroups) {
