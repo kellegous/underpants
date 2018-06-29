@@ -93,7 +93,8 @@ func (c *Context) DomainMemberOfAny(domain string, domainGroups []string) bool {
 	}
 
 	for _, domainGroup := range domainGroups {
-		// The semantics of * are as if there is an anonymous group that covers all users.
+		// The semantics of * are as if there is an anonymous group that covers all
+    // domains.
 		if domainGroup == "*" {
 			return true
 		}

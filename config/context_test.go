@@ -44,9 +44,9 @@ func TestUserMemberOfAny(t *testing.T) {
 }
 
 type domainMemberOfAnyTest struct {
-	Domain         string
-	DomainGroups   []string
-	Expected       bool
+	Domain       string
+	DomainGroups []string
+	Expected     bool
 }
 
 func TestDomainMemberOfAny(t *testing.T) {
@@ -69,6 +69,31 @@ func TestDomainMemberOfAny(t *testing.T) {
 		{"a.com", []string{"a"}, true},
 		{"a.com", []string{"a", "b"}, true},
 		{"a.com", []string{"b", "*"}, true},
+	}
+
+	for _, test := range tests {
+		if ctx.DomainMemberOfAny(test.Domain, test.DomainGroups) != test.Expected {
+			t.Fatalf("%s member of any of %s should have been %t",
+				test.Domain,
+				strings.Join(test.DomainGroups, ","),
+				test.Expected)
+		}
+	}
+}
+
+func TestDomainMemberOfAnyWithNoAllowedDomainGroups(t *testing.T) {
+	cfg := &Info{
+		DomainGroups: map[string][]string{
+			"a": {"a.com"},
+			"b": {"b.com"},
+		},
+	}
+
+	ctx := BuildContext(cfg, 80, []byte{})
+
+	tests := []domainMemberOfAnyTest{
+		{"a.com", []string{}, false},
+		{"b.com", []string{}, false},
 	}
 
 	for _, test := range tests {
