@@ -3,6 +3,7 @@ package proxy
 import (
 	"io"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"strings"
 
@@ -74,6 +75,27 @@ func (b *Backend) serveHTTPProxy(w http.ResponseWriter, r *http.Request) {
 			zap.String("user", u.Email))
 		http.Error(w,
 			"Forbidden: you are not a member of a group authorized to view this site.",
+			http.StatusForbidden)
+		return
+	}
+
+	// Validate properly formatted email address
+	if _, err := mail.ParseAddress(u.Email); err != nil {
+		http.Error(w,
+			"Forbidden: your email address is invalid.",
+			http.StatusForbidden)
+		return
+	}
+
+	email := strings.Split(u.Email, "@")
+	domain := email[len(email)-1]
+
+	if !b.Ctx.DomainMemberOfAny(domain, b.Route.AllowedDomainGroups) {
+		zap.L().Info("access denied (domain not in group)",
+			zap.String("from", b.Route.From),
+			zap.String("user", u.Email))
+		http.Error(w,
+			"Forbidden: your domain is not a member of the group authorized to view this site.",
 			http.StatusForbidden)
 		return
 	}
