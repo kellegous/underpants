@@ -18,39 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package zapcore
-
-import (
-	"testing"
-
-	"go.uber.org/zap/internal/ztest"
-)
-
-func BenchmarkMultiWriteSyncer(b *testing.B) {
-	b.Run("2", func(b *testing.B) {
-		w := NewMultiWriteSyncer(
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-		)
-		b.ResetTimer()
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				w.Write([]byte("foobarbazbabble"))
-			}
-		})
-	})
-	b.Run("4", func(b *testing.B) {
-		w := NewMultiWriteSyncer(
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-		)
-		b.ResetTimer()
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				w.Write([]byte("foobarbazbabble"))
-			}
-		})
-	})
-}
+// Package ztest provides low-level helpers for testing log output. These
+// utilities are helpful in zap's own unit tests, but any assertions using
+// them are strongly coupled to a single encoding.
+package ztest // import "go.uber.org/zap/internal/ztest"

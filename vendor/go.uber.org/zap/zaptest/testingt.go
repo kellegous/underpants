@@ -1,4 +1,4 @@
-// Copyright (c) 2016 Uber Technologies, Inc.
+// Copyright (c) 2017 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,39 +18,30 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package zapcore
+package zaptest
 
-import (
-	"testing"
+// TestingT is a subset of the API provided by all *testing.T and *testing.B
+// objects.
+type TestingT interface {
+	// Logs the given message without failing the test.
+	Logf(string, ...interface{})
 
-	"go.uber.org/zap/internal/ztest"
-)
+	// Logs the given message and marks the test as failed.
+	Errorf(string, ...interface{})
 
-func BenchmarkMultiWriteSyncer(b *testing.B) {
-	b.Run("2", func(b *testing.B) {
-		w := NewMultiWriteSyncer(
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-		)
-		b.ResetTimer()
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				w.Write([]byte("foobarbazbabble"))
-			}
-		})
-	})
-	b.Run("4", func(b *testing.B) {
-		w := NewMultiWriteSyncer(
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-		)
-		b.ResetTimer()
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				w.Write([]byte("foobarbazbabble"))
-			}
-		})
-	})
+	// Marks the test as failed.
+	Fail()
+
+	// Returns true if the test has been marked as failed.
+	Failed() bool
+
+	// Returns the name of the test.
+	Name() string
+
+	// Marks the test as failed and stops execution of that test.
+	FailNow()
 }
+
+// Note: We currently only rely on Logf. We are including Errorf and FailNow
+// in the interface in anticipation of future need since we can't extend the
+// interface without a breaking change.
