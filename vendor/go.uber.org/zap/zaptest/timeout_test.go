@@ -18,39 +18,26 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package zapcore
+package zaptest
 
 import (
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap/internal/ztest"
 )
 
-func BenchmarkMultiWriteSyncer(b *testing.B) {
-	b.Run("2", func(b *testing.B) {
-		w := NewMultiWriteSyncer(
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-		)
-		b.ResetTimer()
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				w.Write([]byte("foobarbazbabble"))
-			}
-		})
-	})
-	b.Run("4", func(b *testing.B) {
-		w := NewMultiWriteSyncer(
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-		)
-		b.ResetTimer()
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				w.Write([]byte("foobarbazbabble"))
-			}
-		})
-	})
+func TestTimeout(t *testing.T) {
+	defer ztest.Initialize("2")()
+	assert.Equal(t, time.Duration(100), Timeout(50), "Expected to scale up timeout.")
+}
+
+func TestSleep(t *testing.T) {
+	defer ztest.Initialize("2")()
+	const sleepFor = 50 * time.Millisecond
+	now := time.Now()
+	Sleep(sleepFor)
+	elapsed := time.Since(now)
+	assert.True(t, 2*sleepFor <= elapsed, "Expected to scale up timeout.")
 }
