@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"bytes"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/mail"
 	"net/url"
@@ -121,10 +123,20 @@ func (b *Backend) serveHTTPProxy(w http.ResponseWriter, r *http.Request) {
 	br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
 	br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
 
+	// Read from and reset request body.
+	var bodyBytes []byte
+	if br.Body != nil {
+		bodyBytes, _ = ioutil.ReadAll(br.Body)
+	}
+
+	br.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
+	bodyString := string(bodyBytes)
+
 	zap.L().Info("proxying request",
 		zap.String("from", b.Route.From),
 		zap.String("uri", r.RequestURI),
 		zap.String("method", r.Method),
+		zap.String("body", bodyString),
 		zap.String("dest", rebase.String()),
 		zap.String("user", u.Email))
 
