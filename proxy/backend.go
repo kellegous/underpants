@@ -124,6 +124,7 @@ func (b *Backend) serveHTTPProxy(w http.ResponseWriter, r *http.Request) {
 	zap.L().Info("proxying request",
 		zap.String("from", b.Route.From),
 		zap.String("uri", r.RequestURI),
+		zap.String("method", r.Method),
 		zap.String("dest", rebase.String()),
 		zap.String("user", u.Email))
 
