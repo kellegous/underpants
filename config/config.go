@@ -43,6 +43,12 @@ type RouteInfo struct {
 	// A special group, `*`, may be specified which allows any authenticated
 	// user.
 	AllowedGroups []string `json:"allowed-groups"`
+
+	// A list of domain groups which may access this route.  If domain-groups are configured,
+	// users emails who are not a member of one of these domain-groups will be denied access.
+	// A special group, `*`, may be specified which allows any authenticated
+	// user.
+	AllowedDomainGroups []string `json:"allowed-domain-groups"`
 }
 
 // ToURL ...
@@ -52,7 +58,7 @@ func (r *RouteInfo) ToURL() *url.URL {
 
 // Info is a configuration object that is loaded directly from the json config file.
 type Info struct {
-	// The host (without the port specification) that will be acting as the hub
+	// The host (with the port specification) that will be acting as the hub.
 	Host string
 
 	// OAuth related settings
@@ -78,10 +84,20 @@ type Info struct {
 		Key string
 	}
 
+	// Specify the Scheme of public internet facing traffic. While this will generally be 1:1 with
+	// the presences of Certs, using underpants behind another proxy that does SSL termination
+	// such as an AWS Elastic Load Balancer, would mean no certs, but use https scheme.
+	UseHttps bool `json:"use-https"`
+
 	// A mapping of group names to lists of user email addresses that are members
 	// of that group.  If this section is present, then the default behaviour for
 	// a route is to deny all users not in a group on its allowed-groups list.
 	Groups map[string][]string
+
+	// A mapping of domain group names to lists of domains that are members
+	// of that group.  If this section is present, then the default behaviour for
+	// a route is to deny all email domains not present in that group.
+	DomainGroups map[string][]string `json:"domain-groups"`
 
 	// The mappings from hostname to backend server.
 	Routes []*RouteInfo
@@ -99,9 +115,17 @@ func (i *Info) HasGroups() bool {
 	return len(i.Groups) > 0
 }
 
+// HasDomainGroups is used to determine if the instance is configured for multiple domains.
+func (i *Info) HasDomainGroups() bool {
+	return len(i.DomainGroups) > 0
+}
+
 // Scheme is a convience method for getting the relevant scheme based on whether certificates were
 // included in the configuration.
 func (i *Info) Scheme() string {
+	if i.UseHttps {
+		return "https"
+	}
 	if len(i.Certs) > 0 {
 		return "https"
 	}
@@ -119,7 +143,22 @@ func initRoute(r *RouteInfo) error {
 	return nil
 }
 
+// If ENV var is set, overwrite the target passed in
+func initFromEnvVar(varName string, target *string) {
+	envVal := os.Getenv(varName)
+	if envVal != "" {
+		*target = envVal
+	}
+}
+
 func initInfo(n *Info) error {
+	// Allow overwriting oauth config from env vars
+	initFromEnvVar("OAUTH_PROVIDER", &n.Oauth.Provider)
+	initFromEnvVar("OAUTH_DOMAIN", &n.Oauth.Domain)
+	initFromEnvVar("OAUTH_BASE_URL", &n.Oauth.BaseURL)
+	initFromEnvVar("OAUTH_CLIENT_ID", &n.Oauth.ClientID)
+	initFromEnvVar("OAUTH_CLIENT_SECRET", &n.Oauth.ClientSecret)
+
 	if n.Oauth.BaseURL != "" {
 		n.Oauth.BaseURL = strings.TrimRight(n.Oauth.BaseURL, "/")
 	}

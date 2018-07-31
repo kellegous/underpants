@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kellegous/underpants/util"
+	"github.com/playdots/underpants/util"
 )
 
 type route struct {

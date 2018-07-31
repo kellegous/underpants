@@ -1,14 +1,17 @@
 package proxy
 
 import (
+	"bytes"
 	"io"
+	"io/ioutil"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"strings"
 
-	"github.com/kellegous/underpants/auth"
-	"github.com/kellegous/underpants/config"
-	"github.com/kellegous/underpants/user"
+	"github.com/playdots/underpants/auth"
+	"github.com/playdots/underpants/config"
+	"github.com/playdots/underpants/user"
 
 	"go.uber.org/zap"
 )
@@ -57,24 +60,45 @@ func (b *Backend) serveHTTPAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Backend) serveHTTPProxy(w http.ResponseWriter, r *http.Request) {
+	logFields := []zap.Field{
+		zap.String("from", b.Route.From),
+		zap.String("uri", r.RequestURI),
+		zap.String("method", r.Method),
+		zap.String("body", bodyString),
+	}
+
 	u, err := user.DecodeFromRequest(r, b.Ctx.Key)
 	if err != nil {
-		zap.L().Info("authentication required",
-			zap.String("host", r.Host),
-			zap.String("uri", r.RequestURI))
+		zap.L().Info("authentication required. redirecting to auth provider", logFields...)
 		http.Redirect(w, r,
 			b.AuthProvider.GetAuthURL(b.Ctx, r),
 			http.StatusFound)
 		return
 	}
+	logFields = append(logFields, zap.String("user", u.Email))
 
 	if !b.Ctx.UserMemberOfAny(u.Email, b.Route.AllowedGroups) {
-		zap.L().Info("access denied (not in group)",
-			zap.String("from", b.Route.From),
-			zap.String("user", u.Email))
-		http.Error(w,
-			"Forbidden: you are not a member of a group authorized to view this site.",
-			http.StatusForbidden)
+		msg := "Forbidden: you are not a member of a group authorized to view this site."
+		zap.L().Info(msg, logFields...)
+		http.Error(w, msg, http.StatusForbidden)
+		return
+	}
+
+	// Validate properly formatted email address
+	if _, err := mail.ParseAddress(u.Email); err != nil {
+		msg := "Forbidden: your email address is invalid."
+		zap.L().Info(msg, logFields...)
+		http.Error(w, msg, http.StatusForbidden)
+		return
+	}
+
+	email := strings.Split(u.Email, "@")
+	domain := email[len(email)-1]
+
+	if !b.Ctx.DomainMemberOfAny(domain, b.Route.AllowedDomainGroups) {
+		msg := "Forbidden: your domain is not a member of the group authorized to view this site."
+		zap.L().Info(msg, logFields...)
+		http.Error(w, msg, http.StatusForbidden)
 		return
 	}
 
@@ -83,6 +107,7 @@ func (b *Backend) serveHTTPProxy(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
+	logFields = append(logFields, zap.String("dest", rebase.String()))
 
 	br, err := http.NewRequest(r.Method, rebase.String(), r.Body)
 	if err != nil {
@@ -99,12 +124,16 @@ func (b *Backend) serveHTTPProxy(w http.ResponseWriter, r *http.Request) {
 	br.Header.Add("Underpants-Email", url.QueryEscape(u.Email))
 	br.Header.Add("Underpants-Name", url.QueryEscape(u.Name))
 
-	zap.L().Info("proxying request",
-		zap.String("from", b.Route.From),
-		zap.String("uri", r.RequestURI),
-		zap.String("dest", rebase.String()),
-		zap.String("user", u.Email))
+	// Read from and reset request body.
+	var bodyBytes []byte
+	if br.Body != nil {
+		bodyBytes, _ = ioutil.ReadAll(br.Body)
+	}
 
+	br.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
+	bodyString := string(bodyBytes)
+
+	zap.L().Info("proxying request", logFields...)
 	bp, err := http.DefaultTransport.RoundTrip(br)
 	if err != nil {
 		panic(err)

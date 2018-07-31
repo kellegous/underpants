@@ -18,39 +18,42 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package zapcore
+package ztest
 
 import (
-	"testing"
-
-	"go.uber.org/zap/internal/ztest"
+	"log"
+	"os"
+	"strconv"
+	"time"
 )
 
-func BenchmarkMultiWriteSyncer(b *testing.B) {
-	b.Run("2", func(b *testing.B) {
-		w := NewMultiWriteSyncer(
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-		)
-		b.ResetTimer()
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				w.Write([]byte("foobarbazbabble"))
-			}
-		})
-	})
-	b.Run("4", func(b *testing.B) {
-		w := NewMultiWriteSyncer(
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-			&ztest.Discarder{},
-		)
-		b.ResetTimer()
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				w.Write([]byte("foobarbazbabble"))
-			}
-		})
-	})
+var _timeoutScale = 1.0
+
+// Timeout scales the provided duration by $TEST_TIMEOUT_SCALE.
+func Timeout(base time.Duration) time.Duration {
+	return time.Duration(float64(base) * _timeoutScale)
+}
+
+// Sleep scales the sleep duration by $TEST_TIMEOUT_SCALE.
+func Sleep(base time.Duration) {
+	time.Sleep(Timeout(base))
+}
+
+// Initialize checks the environment and alters the timeout scale accordingly.
+// It returns a function to undo the scaling.
+func Initialize(factor string) func() {
+	original := _timeoutScale
+	fv, err := strconv.ParseFloat(factor, 64)
+	if err != nil {
+		panic(err)
+	}
+	_timeoutScale = fv
+	return func() { _timeoutScale = original }
+}
+
+func init() {
+	if v := os.Getenv("TEST_TIMEOUT_SCALE"); v != "" {
+		Initialize(v)
+		log.Printf("Scaling timeouts by %vx.\n", _timeoutScale)
+	}
 }
