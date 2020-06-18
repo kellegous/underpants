@@ -1,8 +1,6 @@
-# cloud.google.com/go v0.17.0
-## explicit
+# cloud.google.com/go v0.34.0
 cloud.google.com/go/compute/metadata
-# github.com/golang/protobuf v0.0.0-20171113180720-1e59b77b52bf
-## explicit
+# github.com/golang/protobuf v1.2.0
 github.com/golang/protobuf/proto
 # github.com/pkg/errors v0.9.1
 ## explicit
@@ -25,25 +23,24 @@ go.uber.org/zap/zapcore
 # golang.org/x/crypto v0.0.0-20171231215028-0fcca4842a8d
 ## explicit
 golang.org/x/crypto/ssh/terminal
-# golang.org/x/net v0.0.0-20171212005608-d866cfc389ce
-## explicit
+# golang.org/x/net v0.0.0-20190108225652-1e06a53dbb7e
 golang.org/x/net/context
 golang.org/x/net/context/ctxhttp
-# golang.org/x/oauth2 v0.0.0-20180102150122-90155042cbc5
+# golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
 ## explicit
 golang.org/x/oauth2
 golang.org/x/oauth2/google
 golang.org/x/oauth2/internal
 golang.org/x/oauth2/jws
 golang.org/x/oauth2/jwt
+golang.org/x/oauth2/mailchimp
 # golang.org/x/sync v0.0.0-20200317015054-43a5402ce75a
 ## explicit
 # golang.org/x/sys v0.0.0-20171222143536-83801418e1b5
 ## explicit
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# google.golang.org/appengine v1.0.0
-## explicit
+# google.golang.org/appengine v1.4.0
 google.golang.org/appengine
 google.golang.org/appengine/internal
 google.golang.org/appengine/internal/app_identity
