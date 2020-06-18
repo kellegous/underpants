@@ -17,6 +17,7 @@ import (
 
 	"github.com/kellegous/underpants/auth"
 	"github.com/kellegous/underpants/auth/google"
+	"github.com/kellegous/underpants/auth/mailchimp"
 	"github.com/kellegous/underpants/auth/okta"
 	"github.com/kellegous/underpants/config"
 	"github.com/kellegous/underpants/hub"
@@ -36,6 +37,8 @@ func getAuthProvider(cfg *config.Info) (auth.Provider, error) {
 		prv = google.Provider
 	case okta.Name:
 		prv = okta.Provider
+	case mailchimp.Name:
+		prv = mailchimp.Provider
 	default:
 		return nil, fmt.Errorf("invalid oauth provider: %s", cfg.Oauth.Provider)
 	}
