@@ -24,11 +24,7 @@ type membership struct {
 
 // Host is the normalized host URLs to the hub.
 func (c *Context) Host() string {
-	switch c.Port {
-	case 80, 443:
-		return c.Info.Host
-	}
-	return fmt.Sprintf("%s:%d", c.Info.Host, c.Port)
+	return c.Info.Host
 }
 
 // ListenAddr is the address that should be passed to net.Listen.

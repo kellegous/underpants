@@ -18,7 +18,7 @@ func TestAuthURL(t *testing.T) {
 				ClientSecret: "client_secret",
 				BaseURL:      "https://oktapreview.com",
 			},
-			Host: "foo.com",
+			Host: "foo.com:9090",
 		},
 		Port: 9090,
 	}
