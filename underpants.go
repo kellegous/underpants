@@ -414,6 +414,7 @@ func generateJWT(hostname string, identity string, secret string) (string, error
 		"sub": fmt.Sprintf("goog:%s", identity),
 		"iss": hostname,
 		"nbf": time.Now().UTC().Unix(),
+		"exp": time.Now().UTC().Unix() + 14*24*3600 + 60, // Google session is 14 days. Make it + 14 days, 1 minute
 	})
 
 	// Sign and get the complete encoded token as a string using the secret
