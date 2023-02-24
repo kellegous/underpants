@@ -20,10 +20,10 @@ go.uber.org/zap/internal/bufferpool
 go.uber.org/zap/internal/color
 go.uber.org/zap/internal/exit
 go.uber.org/zap/zapcore
-# golang.org/x/crypto v0.0.0-20171231215028-0fcca4842a8d
+# golang.org/x/crypto v0.1.0
 ## explicit
 golang.org/x/crypto/ssh/terminal
-# golang.org/x/net v0.0.0-20190108225652-1e06a53dbb7e
+# golang.org/x/net v0.1.0
 golang.org/x/net/context
 golang.org/x/net/context/ctxhttp
 # golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
@@ -34,12 +34,13 @@ golang.org/x/oauth2/internal
 golang.org/x/oauth2/jws
 golang.org/x/oauth2/jwt
 golang.org/x/oauth2/mailchimp
-# golang.org/x/sync v0.0.0-20200317015054-43a5402ce75a
-## explicit
-# golang.org/x/sys v0.0.0-20171222143536-83801418e1b5
-## explicit
+# golang.org/x/sys v0.1.0
+golang.org/x/sys/internal/unsafeheader
+golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
+# golang.org/x/term v0.1.0
+golang.org/x/term
 # google.golang.org/appengine v1.4.0
 google.golang.org/appengine
 google.golang.org/appengine/internal
