@@ -22,6 +22,7 @@ package zap
 
 import (
 	"go.uber.org/atomic"
+	"go.uber.org/zap/internal"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -70,6 +71,8 @@ type AtomicLevel struct {
 	l *atomic.Int32
 }
 
+var _ internal.LeveledEnabler = AtomicLevel{}
+
 // NewAtomicLevel creates an AtomicLevel with InfoLevel and above logging
 // enabled.
 func NewAtomicLevel() AtomicLevel {
@@ -78,12 +81,29 @@ func NewAtomicLevel() AtomicLevel {
 	}
 }
 
-// NewAtomicLevelAt is a convienence function that creates an AtomicLevel
+// NewAtomicLevelAt is a convenience function that creates an AtomicLevel
 // and then calls SetLevel with the given level.
 func NewAtomicLevelAt(l zapcore.Level) AtomicLevel {
 	a := NewAtomicLevel()
 	a.SetLevel(l)
 	return a
+}
+
+// ParseAtomicLevel parses an AtomicLevel based on a lowercase or all-caps ASCII
+// representation of the log level. If the provided ASCII representation is
+// invalid an error is returned.
+//
+// This is particularly useful when dealing with text input to configure log
+// levels.
+func ParseAtomicLevel(text string) (AtomicLevel, error) {
+	a := NewAtomicLevel()
+	l, err := zapcore.ParseLevel(text)
+	if err != nil {
+		return a, err
+	}
+
+	a.SetLevel(l)
+	return a, nil
 }
 
 // Enabled implements the zapcore.LevelEnabler interface, which allows the

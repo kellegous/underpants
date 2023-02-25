@@ -1,46 +1,51 @@
-# cloud.google.com/go v0.34.0
+# cloud.google.com/go/compute v1.18.0
+## explicit
+cloud.google.com/go/compute/internal
+# cloud.google.com/go/compute/metadata v0.2.3
 cloud.google.com/go/compute/metadata
-# github.com/golang/protobuf v1.2.0
+# github.com/golang/protobuf v1.5.2
 github.com/golang/protobuf/proto
 # github.com/pkg/errors v0.9.1
 ## explicit
-# github.com/stretchr/testify v1.6.1
-## explicit
-# go.uber.org/atomic v1.3.1
+# go.uber.org/atomic v1.10.0
 ## explicit
 go.uber.org/atomic
-# go.uber.org/multierr v1.1.0
+# go.uber.org/multierr v1.9.0
 ## explicit
 go.uber.org/multierr
-# go.uber.org/zap v1.7.1
+# go.uber.org/zap v1.24.0
 ## explicit
 go.uber.org/zap
 go.uber.org/zap/buffer
+go.uber.org/zap/internal
 go.uber.org/zap/internal/bufferpool
 go.uber.org/zap/internal/color
 go.uber.org/zap/internal/exit
 go.uber.org/zap/zapcore
-# golang.org/x/crypto v0.0.0-20171231215028-0fcca4842a8d
+# golang.org/x/crypto v0.6.0
 ## explicit
 golang.org/x/crypto/ssh/terminal
-# golang.org/x/net v0.0.0-20190108225652-1e06a53dbb7e
+# golang.org/x/net v0.7.0
+## explicit
 golang.org/x/net/context
-golang.org/x/net/context/ctxhttp
-# golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
+# golang.org/x/oauth2 v0.5.0
 ## explicit
 golang.org/x/oauth2
+golang.org/x/oauth2/authhandler
 golang.org/x/oauth2/google
+golang.org/x/oauth2/google/internal/externalaccount
 golang.org/x/oauth2/internal
 golang.org/x/oauth2/jws
 golang.org/x/oauth2/jwt
 golang.org/x/oauth2/mailchimp
-# golang.org/x/sync v0.0.0-20200317015054-43a5402ce75a
-## explicit
-# golang.org/x/sys v0.0.0-20171222143536-83801418e1b5
-## explicit
+# golang.org/x/sys v0.5.0
+golang.org/x/sys/internal/unsafeheader
+golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# google.golang.org/appengine v1.4.0
+# golang.org/x/term v0.5.0
+golang.org/x/term
+# google.golang.org/appengine v1.6.7
 google.golang.org/appengine
 google.golang.org/appengine/internal
 google.golang.org/appengine/internal/app_identity
@@ -51,3 +56,31 @@ google.golang.org/appengine/internal/modules
 google.golang.org/appengine/internal/remote_api
 google.golang.org/appengine/internal/urlfetch
 google.golang.org/appengine/urlfetch
+# google.golang.org/protobuf v1.28.1
+google.golang.org/protobuf/encoding/prototext
+google.golang.org/protobuf/encoding/protowire
+google.golang.org/protobuf/internal/descfmt
+google.golang.org/protobuf/internal/descopts
+google.golang.org/protobuf/internal/detrand
+google.golang.org/protobuf/internal/encoding/defval
+google.golang.org/protobuf/internal/encoding/messageset
+google.golang.org/protobuf/internal/encoding/tag
+google.golang.org/protobuf/internal/encoding/text
+google.golang.org/protobuf/internal/errors
+google.golang.org/protobuf/internal/filedesc
+google.golang.org/protobuf/internal/filetype
+google.golang.org/protobuf/internal/flags
+google.golang.org/protobuf/internal/genid
+google.golang.org/protobuf/internal/impl
+google.golang.org/protobuf/internal/order
+google.golang.org/protobuf/internal/pragma
+google.golang.org/protobuf/internal/set
+google.golang.org/protobuf/internal/strs
+google.golang.org/protobuf/internal/version
+google.golang.org/protobuf/proto
+google.golang.org/protobuf/reflect/protodesc
+google.golang.org/protobuf/reflect/protoreflect
+google.golang.org/protobuf/reflect/protoregistry
+google.golang.org/protobuf/runtime/protoiface
+google.golang.org/protobuf/runtime/protoimpl
+google.golang.org/protobuf/types/descriptorpb
