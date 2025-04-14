@@ -1,5 +1,5 @@
-$(GOPATH)/bin/underpants: $(shell find . -type f -not -path "./vendor/*" -not -path "./.git/*")
-	go install github.com/kellegous/underpants
+bin/underpants: $(shell find . -type f -name "*.go")
+	go build -o $@ ./underpants.go
 
 test:
 	go test github.com/kellegous/underpants/auth/... \
@@ -9,4 +9,4 @@ test:
 		github.com/kellegous/underpants/util
 
 clean:
-	rm -f $(GOPATH)/bin/underpants
+	rm -rf bin
